@@ -1,26 +1,156 @@
 @import "tailwindcss";
 
+/* Configure Tailwind v4 selector-based dark mode */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  
+  --clinic-primary: #0d9488;       /* Teal-600 */
+  --clinic-primary-hover: #0f766e; /* Teal-700 */
+  --clinic-primary-light: #f0fdfa; /* Teal-50 */
+  
+  --clinic-secondary: #0284c7;     /* Sky-600 */
+  --clinic-accent: #f59e0b;        /* Amber-500 */
+  
+  --card-bg: rgba(255, 255, 255, 0.85);
+  --card-border: rgba(226, 232, 240, 0.8);
+  --card-shadow: 0 10px 30px -10px rgba(148, 163, 184, 0.15), 0 1px 3px rgba(148, 163, 184, 0.05);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.dark {
+  --background: #0b1329;           /* Deep Navy */
+  --foreground: #f1f5f9;
+  
+  --clinic-primary: #14b8a6;       /* Teal-500 */
+  --clinic-primary-hover: #2dd4bf; /* Teal-400 */
+  --clinic-primary-light: #042f2e; /* Teal-950 */
+  
+  --clinic-secondary: #38bdf8;     /* Sky-400 */
+  --clinic-accent: #fbbf24;        /* Amber-400 */
+  
+  --card-bg: rgba(15, 23, 42, 0.7);
+  --card-border: rgba(51, 65, 85, 0.5);
+  --card-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  overflow-x: hidden;
+  min-height: 100vh;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Glassmorphism card utility - standardized across the app */
+.glass-card {
+  background: var(--card-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--card-shadow);
+  border-radius: 24px;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
+}
+
+/* Active glowing pulse animation for called elements */
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 15px 2px rgba(20, 184, 166, 0.3);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 25px 8px rgba(20, 184, 166, 0.5);
+    transform: scale(1.01);
+  }
+}
+
+.pulse-glow {
+  animation: pulseGlow 2.5s infinite ease-in-out;
+}
+
+/* Entrance Animations */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+/* Shimmer Animation for Skeletons */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.animate-shimmer::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  transform: translateX(-100%);
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0,
+    rgba(255, 255, 255, 0.1) 20%,
+    rgba(255, 255, 255, 0.2) 60%,
+    rgba(255, 255, 255, 0)
+  );
+  animation: shimmer 2s infinite;
+  content: '';
+}
+
+.dark .animate-shimmer::after {
+  background-image: linear-gradient(
+    90deg,
+    rgba(15, 23, 42, 0) 0,
+    rgba(15, 23, 42, 0.1) 20%,
+    rgba(15, 23, 42, 0.2) 60%,
+    rgba(15, 23, 42, 0)
+  );
+}
+
+/* Scrollbar Customization */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--card-border);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--clinic-primary);
 }

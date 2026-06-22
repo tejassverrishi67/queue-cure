@@ -1,0 +1,39 @@
+{
+  "currentToken": "A004",
+  "averageConsultationTime": 5,
+  "waitingPatients": [
+    {
+      "id": "1782142977765-yjshgl6",
+      "name": "Rishi",
+      "tokenNumber": "A001",
+      "createdAt": "2026-06-22T15:42:57.765Z",
+      "status": "called",
+      "calledAt": "2026-06-22T15:43:43.803Z"
+    },
+    {
+      "id": "1782142996380-1vmigh8",
+      "name": "Teju",
+      "tokenNumber": "A002",
+      "createdAt": "2026-06-22T15:43:16.380Z",
+      "status": "called",
+      "calledAt": "2026-06-22T15:43:48.546Z"
+    },
+    {
+      "id": "1782143007124-1czfl8x",
+      "name": "Swathi",
+      "tokenNumber": "A003",
+      "createdAt": "2026-06-22T15:43:27.124Z",
+      "status": "called",
+      "calledAt": "2026-06-22T15:43:51.936Z"
+    },
+    {
+      "id": "1782143009078-s1iu79e",
+      "name": "Vishnu",
+      "tokenNumber": "A004",
+      "createdAt": "2026-06-22T15:43:29.078Z",
+      "status": "called",
+      "calledAt": "2026-06-22T15:43:55.794Z"
+    }
+  ],
+  "lastTokenIndex": 4
+}
