@@ -72,15 +72,17 @@ app.prepare().then(() => {
   });
 
   io.on("connection", (socket) => {
-    console.log(`[Socket] Client connected: ${socket.id}`);
+    console.log(`[Socket] Client connected: ${socket.id} | Total Connected: ${io.engine.clientsCount}`);
     
     // Immediately send the current state to the connecting client
     socket.emit("queueUpdated", queueState);
+    console.log(`[SERVER]\nCurrent Token: ${queueState.currentToken}\nQueue Length: ${queueState.waitingPatients.filter(p => p.status === "waiting").length}\nLast Token: ${queueState.lastTokenIndex}\nConnected Clients: ${io.engine.clientsCount}\n`);
 
     // Event: Request Queue (handshake)
     socket.on("requestQueue", () => {
       console.log(`[Socket] State requested by client: ${socket.id}`);
       socket.emit("queueUpdated", queueState);
+      console.log(`[SERVER]\nCurrent Token: ${queueState.currentToken}\nQueue Length: ${queueState.waitingPatients.filter(p => p.status === "waiting").length}\nLast Token: ${queueState.lastTokenIndex}\nConnected Clients: ${io.engine.clientsCount}\n`);
     });
 
     // Event: Add Patient
@@ -104,6 +106,7 @@ app.prepare().then(() => {
       console.log(`[Socket] Patient added: ${newPatient.name} with token ${newToken}`);
       io.emit("patientAdded", { name: newPatient.name, tokenNumber: newToken });
       io.emit("queueUpdated", queueState);
+      console.log(`[SERVER]\nCurrent Token: ${queueState.currentToken}\nQueue Length: ${queueState.waitingPatients.filter(p => p.status === "waiting").length}\nLast Token: ${queueState.lastTokenIndex}\nConnected Clients: ${io.engine.clientsCount}\n`);
     });
 
     // Event: Call Next Patient
@@ -123,6 +126,7 @@ app.prepare().then(() => {
           patientName: nextPatient.name 
         });
         io.emit("queueUpdated", queueState);
+        console.log(`[SERVER]\nCurrent Token: ${queueState.currentToken}\nQueue Length: ${queueState.waitingPatients.filter(p => p.status === "waiting").length}\nLast Token: ${queueState.lastTokenIndex}\nConnected Clients: ${io.engine.clientsCount}\n`);
       } else {
         console.log(`[Socket] Call Next triggered, but no waiting patients available.`);
       }
@@ -140,6 +144,7 @@ app.prepare().then(() => {
         console.log(`[Socket] Average consultation time updated to: ${mins} mins`);
         io.emit("consultationTimeUpdated", { minutes: mins });
         io.emit("queueUpdated", queueState);
+        console.log(`[SERVER]\nCurrent Token: ${queueState.currentToken}\nQueue Length: ${queueState.waitingPatients.filter(p => p.status === "waiting").length}\nLast Token: ${queueState.lastTokenIndex}\nConnected Clients: ${io.engine.clientsCount}\n`);
       }
     });
 
@@ -156,6 +161,7 @@ app.prepare().then(() => {
       console.log("[Socket] Queue reset successfully");
       io.emit("queueReset");
       io.emit("queueUpdated", queueState);
+      console.log(`[SERVER]\nCurrent Token: ${queueState.currentToken}\nQueue Length: ${queueState.waitingPatients.filter(p => p.status === "waiting").length}\nLast Token: ${queueState.lastTokenIndex}\nConnected Clients: ${io.engine.clientsCount}\n`);
     });
 
     socket.on("disconnect", () => {

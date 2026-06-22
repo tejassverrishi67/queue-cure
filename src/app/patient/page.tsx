@@ -15,90 +15,31 @@ import {
   RotateCcw,
   ArrowRight,
   UserCheck,
-  Volume2,
-  VolumeX,
   MapPin,
   Calendar
 } from "lucide-react";
 
-// Web Audio chime synthesizer function to play clinical bells on-demand without asset lag
-function playChime(type: "call" | "celebrate") {
-  try {
-    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const ctx = new AudioContextClass();
-    const now = ctx.currentTime;
-
-    if (type === "call") {
-      // Pleasant clinical chime (D5 -> A4 dual tone)
-      const osc1 = ctx.createOscillator();
-      const gain1 = ctx.createGain();
-      osc1.type = "sine";
-      osc1.frequency.setValueAtTime(587.33, now);
-      gain1.gain.setValueAtTime(0.08, now);
-      gain1.gain.exponentialRampToValueAtTime(0.0001, now + 0.8);
-      osc1.connect(gain1);
-      gain1.connect(ctx.destination);
-
-      const osc2 = ctx.createOscillator();
-      const gain2 = ctx.createGain();
-      osc2.type = "sine";
-      osc2.frequency.setValueAtTime(440.00, now + 0.2);
-      gain2.gain.setValueAtTime(0.08, now + 0.2);
-      gain2.gain.exponentialRampToValueAtTime(0.0001, now + 1.0);
-      osc2.connect(gain2);
-      gain2.connect(ctx.destination);
-
-      osc1.start(now);
-      osc1.stop(now + 0.8);
-      osc2.start(now + 0.2);
-      osc2.stop(now + 1.0);
-    } else {
-      // Success celebration arpeggio (C4 -> E4 -> G4 -> C5)
-      const notes = [261.63, 329.63, 392.00, 523.25];
-      notes.forEach((freq, idx) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = "triangle";
-        osc.frequency.setValueAtTime(freq, now + idx * 0.12);
-        gain.gain.setValueAtTime(0.06, now + idx * 0.12);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.12 + 0.6);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(now + idx * 0.12);
-        osc.stop(now + idx * 0.12 + 0.6);
-      });
-    }
-  } catch (err) {
-    console.warn("Synthesized audio playback was blocked or failed", err);
-  }
-}
-
 export default function PatientPage() {
-  const { socket, isConnected } = useSocket();
+  const { socket } = useSocket();
   const { addToast } = useToast();
   const [queueState, setQueueState] = useState<QueueState | null>(null);
   const [myTokenInput, setMyTokenInput] = useState("");
   const [myToken, setMyToken] = useState<string | null>(null);
-  const [audioEnabled, setAudioEnabled] = useState(false);
 
-  // References to keep event callbacks up-to-date without rebuilding socket listeners
+  // Reference to keep track of the current token in socket listeners
   const myTokenRef = useRef(myToken);
-  const audioEnabledRef = useRef(audioEnabled);
 
   useEffect(() => {
     myTokenRef.current = myToken;
   }, [myToken]);
 
-  useEffect(() => {
-    audioEnabledRef.current = audioEnabled;
-  }, [audioEnabled]);
-
-  // Sync state and alerts on socket updates
+  // Sync state on socket updates
   useEffect(() => {
     if (!socket) return;
 
     const handleQueueUpdated = (state: QueueState) => {
       console.log("[Patient] Queue state updated:", state);
+      console.log(`[CLIENT]\nReceived queueUpdated\nCurrent Token: ${state.currentToken || "null"}\nQueue Length: ${state.waitingPatients.filter(p => p.status === "waiting").length}\n`);
       setQueueState(state);
     };
 
@@ -107,21 +48,11 @@ export default function PatientPage() {
       
       // Display general call toast
       addToast(`Token Called: ${data.currentToken}`, "info");
-
-      // Play chime if audio is enabled
-      if (audioEnabledRef.current) {
-        if (myTokenRef.current && data.currentToken === myTokenRef.current) {
-          playChime("celebrate");
-        } else {
-          playChime("call");
-        }
-      }
     };
 
     const handleQueueReset = () => {
       console.log("[Patient] Queue database reset");
       addToast("Queue state has been reset by the clinic", "warning");
-      // Let the client keep the token in localStorage but mark as reset/not found
     };
 
     const handleConsultationTimeUpdated = (data: { minutes: number }) => {
@@ -147,31 +78,13 @@ export default function PatientPage() {
     };
   }, [socket, addToast]);
 
-  // Load state and audio choices from localStorage on mount
+  // Load state from localStorage on mount
   useEffect(() => {
     const savedToken = localStorage.getItem("selectedToken");
     if (savedToken) {
       setTimeout(() => setMyToken(savedToken), 0);
     }
-    const savedAudio = localStorage.getItem("audioAlertsEnabled");
-    if (savedAudio === "true") {
-      setTimeout(() => setAudioEnabled(true), 0);
-    }
   }, []);
-
-  // Toggle audio alerts handler
-  const handleToggleAudio = () => {
-    const nextVal = !audioEnabled;
-    setAudioEnabled(nextVal);
-    localStorage.setItem("audioAlertsEnabled", String(nextVal));
-    if (nextVal) {
-      // Play a short soft tone to confirm audio functionality
-      playChime("call");
-      addToast("Audio notifications enabled.", "success");
-    } else {
-      addToast("Audio notifications disabled.", "info");
-    }
-  };
 
   // Form submission: Track token
   const handleTrackToken = (e: React.FormEvent) => {
@@ -245,7 +158,7 @@ export default function PatientPage() {
     steps.push({ label: `Serving: ${currentToken}`, active: true, isYou: false });
     
     if (indexInWaiting === 0) {
-      // You are literally next
+      // You are next up
       steps.push({ label: "You are next up!", active: true, isYou: true });
     } else if (indexInWaiting === 1) {
       steps.push({ label: waitingPatients[0].tokenNumber, active: false, isYou: false });
@@ -255,7 +168,7 @@ export default function PatientPage() {
       steps.push({ label: waitingPatients[1].tokenNumber, active: false, isYou: false });
       steps.push({ label: `${myToken} (You)`, active: true, isYou: true });
     } else {
-      // Too many patients, collapse intermediate ones
+      // Collapse intermediate patients for readability
       steps.push({ label: `Next: ${waitingPatients[0].tokenNumber}`, active: false, isYou: false });
       steps.push({ label: `${indexInWaiting - 1} patients ahead`, active: false, isYou: false });
       steps.push({ label: `${myToken} (You)`, active: true, isYou: true });
@@ -268,24 +181,24 @@ export default function PatientPage() {
         </h3>
         <div className="relative flex items-center justify-between w-full max-w-md mx-auto py-2">
           {/* Connector Line */}
-          <div className="absolute top-1/2 left-4 right-4 h-0.5 bg-slate-200 dark:bg-slate-800 -translate-y-1/2 -z-10 transition-colors"></div>
+          <div className="absolute top-1/2 left-4 right-4 h-0.5 bg-slate-200 dark:bg-slate-855 -translate-y-1/2 -z-10 transition-colors"></div>
           
           {steps.map((step, idx) => (
-            <div key={idx} className="flex flex-col items-center gap-1.5 bg-slate-50 dark:bg-[#0b1329] px-2 relative transition-colors">
+            <div key={idx} className="flex flex-col items-center gap-1.5 bg-[var(--background)] px-2 relative transition-colors">
               <div 
                 className={`w-6 h-6 rounded-full flex items-center justify-center border-2 text-[10px] font-bold transition-all ${
                   step.isYou 
                     ? "bg-teal-500 border-teal-500 text-white shadow-lg shadow-teal-500/20 animate-pulse" 
                     : step.active
-                      ? "bg-sky-500/10 border-sky-500 text-sky-600 dark:text-sky-400"
-                      : "bg-slate-100 border-slate-350 dark:bg-slate-800 dark:border-slate-700 text-slate-500"
+                      ? "bg-sky-500/10 border-sky-500 text-sky-650 dark:text-sky-400"
+                      : "bg-[var(--card-bg)] border-[var(--card-border)] text-slate-500"
                 }`}
               >
                 {step.isYou ? "★" : idx + 1}
               </div>
               <span className={`text-[10px] font-extrabold ${
                 step.isYou 
-                  ? "text-teal-600 dark:text-teal-400" 
+                  ? "text-teal-650 dark:text-teal-400" 
                   : "text-slate-600 dark:text-slate-400"
               }`}>
                 {step.label}
@@ -300,7 +213,7 @@ export default function PatientPage() {
   return (
     <div className="flex-1 flex flex-col min-h-screen">
       {/* Header */}
-      <header className="border-b border-slate-200/80 dark:border-slate-800/80 bg-white/70 dark:bg-[#0f172a]/70 backdrop-blur-md sticky top-0 z-40 px-4 sm:px-6 py-4 transition-colors">
+      <header className="border-b border-[var(--card-border)] bg-[var(--card-bg)]/80 backdrop-blur-md sticky top-0 z-40 px-4 sm:px-6 py-4 transition-colors">
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <Link 
@@ -315,13 +228,6 @@ export default function PatientPage() {
                 <h1 className="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100">
                   Patient Waiting Room
                 </h1>
-                <span className="text-xs text-slate-400 font-mono hidden sm:inline">|</span>
-                <div className="flex items-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></span>
-                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                    {isConnected ? "Live Connection" : "Reconnecting"}
-                  </span>
-                </div>
               </div>
               <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
                 Real-Time Queue Tracking Portal
@@ -330,18 +236,6 @@ export default function PatientPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Audio Toggle Button */}
-            <button
-              onClick={handleToggleAudio}
-              className={`p-2.5 rounded-xl border transition-all duration-200 flex items-center justify-center cursor-pointer shadow-sm ${
-                audioEnabled 
-                  ? "bg-teal-500/10 border-teal-500/35 text-teal-600 dark:text-teal-400" 
-                  : "bg-white/50 border-slate-200/80 dark:bg-slate-900/50 dark:border-slate-800 text-slate-400 dark:text-slate-550"
-              }`}
-              title={audioEnabled ? "Disable Audio Alerts" : "Enable Audio Alerts"}
-            >
-              {audioEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
-            </button>
             <ThemeToggle />
           </div>
         </div>
@@ -355,7 +249,7 @@ export default function PatientPage() {
           <div className="w-full max-w-md mx-auto space-y-6 animate-slide-up">
             
             {/* Live Serving Banner */}
-            <div className="glass-card p-6 text-center border-teal-500/20 bg-teal-500/5">
+            <div className="glass-card p-6 text-center border-[var(--clinic-primary)]/20 bg-[var(--clinic-primary-light)]">
               <span className="text-2xs font-extrabold text-teal-600 dark:text-teal-400 uppercase tracking-wider block mb-1">
                 Currently Serving
               </span>
@@ -380,7 +274,7 @@ export default function PatientPage() {
                     value={myTokenInput}
                     onChange={(e) => setMyTokenInput(e.target.value)}
                     placeholder="e.g. A001"
-                    className="w-full px-4 py-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/40 dark:bg-slate-900/40 text-center text-xl font-extrabold font-mono tracking-widest text-slate-800 dark:text-slate-100 placeholder-slate-350 uppercase focus:border-sky-500 focus:ring-2 focus:ring-sky-500/10 outline-none transition-all"
+                    className="w-full px-4 py-3.5 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)]/40 text-center text-xl font-extrabold font-mono tracking-widest text-slate-800 dark:text-slate-100 placeholder-slate-350 uppercase focus:border-[var(--clinic-secondary)] focus:ring-2 focus:ring-[var(--clinic-secondary)]/10 outline-none transition-all"
                     required
                     autoComplete="off"
                   />
@@ -389,7 +283,7 @@ export default function PatientPage() {
                 <button
                   type="submit"
                   disabled={!myTokenInput.trim()}
-                  className="w-full py-4 px-4 rounded-2xl bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 dark:disabled:text-slate-600 text-white font-extrabold text-sm shadow-lg shadow-sky-500/10 hover:shadow-sky-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer border-none"
+                  className="w-full py-4 px-4 rounded-2xl bg-sky-650 hover:bg-sky-750 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 dark:disabled:text-slate-655 text-white font-extrabold text-sm shadow-lg shadow-sky-500/10 hover:shadow-sky-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer border-none"
                 >
                   Start Tracking
                   <ArrowRight className="w-4.5 h-4.5" />
@@ -408,7 +302,7 @@ export default function PatientPage() {
                     <button
                       key={patient.id}
                       onClick={() => handleQuickSelect(patient.tokenNumber)}
-                      className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-850 hover:bg-teal-600 dark:hover:bg-teal-600 hover:text-white border border-slate-200/60 dark:border-slate-800 text-slate-700 dark:text-slate-300 font-extrabold font-mono text-xs transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-sm"
+                      className="px-3.5 py-2 rounded-xl bg-[var(--card-bg)] border border-[var(--card-border)] text-slate-700 dark:text-slate-300 font-extrabold font-mono text-xs transition-all hover:bg-[var(--clinic-primary-light)] hover:text-[var(--clinic-primary)] hover:border-[var(--clinic-primary)]/45 hover:scale-105 active:scale-95 cursor-pointer shadow-sm backdrop-blur-md"
                     >
                       {patient.tokenNumber}
                     </button>
@@ -416,7 +310,7 @@ export default function PatientPage() {
                 </div>
               </div>
             ) : (
-              <div className="text-center py-6 text-slate-400 dark:text-slate-500 text-xs font-semibold">
+              <div className="text-center py-6 text-slate-450 dark:text-slate-500 text-xs font-semibold">
                 No active patients registered in the queue today.
               </div>
             )}
@@ -429,7 +323,7 @@ export default function PatientPage() {
             
             {/* Celebration: Token has been called */}
             {tokenStatus === "called" && (
-              <div className="glass-card overflow-hidden border-teal-500/35 bg-teal-500/5 p-8 text-center space-y-6 pulse-glow relative">
+              <div className="glass-card overflow-hidden border-[var(--clinic-primary)]/30 bg-[var(--clinic-primary-light)] p-8 text-center space-y-6 pulse-glow relative">
                 {/* SVG Confetti background for celebratory visuals */}
                 <div className="absolute inset-0 pointer-events-none -z-10 opacity-70">
                   <svg className="w-full h-full" xmlns="http://www.w3.org/2000/svg">
@@ -446,10 +340,10 @@ export default function PatientPage() {
                 </div>
                 
                 <div className="space-y-3">
-                  <h2 className="text-3xl font-extrabold text-teal-600 dark:text-teal-450">
+                  <h2 className="text-3xl font-extrabold text-teal-650 dark:text-teal-450">
                     {"It's Your Turn!"}
                   </h2>
-                  <div className="py-2.5 px-6 bg-teal-500/10 rounded-2xl inline-block">
+                  <div className="py-2.5 px-6 bg-[var(--clinic-primary)]/10 rounded-2xl inline-block">
                     <span className="font-mono text-4xl font-extrabold text-slate-800 dark:text-slate-100 tracking-widest">{myToken}</span>
                   </div>
                   <p className="text-slate-600 dark:text-slate-350 font-bold max-w-sm mx-serif mx-auto leading-relaxed pt-2">
@@ -463,18 +357,18 @@ export default function PatientPage() {
             {tokenStatus === "waiting" && (
               <div className="glass-card overflow-hidden">
                 {/* Visual Ticket Header */}
-                <div className="bg-gradient-to-r from-teal-500/10 to-sky-500/10 border-b border-slate-200/50 dark:border-slate-800/80 p-6 text-center relative">
+                <div className="bg-gradient-to-r from-teal-500/10 to-sky-500/10 border-b border-[var(--card-border)] p-6 text-center relative">
                   {/* Decorative ticket notch cutouts on sides */}
-                  <div className="absolute -left-3 bottom-0 w-6 h-6 rounded-full bg-slate-50 dark:bg-[#0b1329] border border-slate-200/50 dark:border-slate-800/80"></div>
-                  <div className="absolute -right-3 bottom-0 w-6 h-6 rounded-full bg-slate-50 dark:bg-[#0b1329] border border-slate-200/50 dark:border-slate-800/80"></div>
+                  <div className="absolute -left-3 bottom-0 w-6 h-6 rounded-full bg-[var(--background)] border border-[var(--card-border)]"></div>
+                  <div className="absolute -right-3 bottom-0 w-6 h-6 rounded-full bg-[var(--background)] border border-[var(--card-border)]"></div>
 
-                  <span className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
+                  <span className="text-[10px] font-extrabold text-slate-455 dark:text-slate-500 uppercase tracking-widest block mb-1">
                     Active Ticket Info
                   </span>
                   
                   {/* Visual Ticket Container */}
-                  <div className="max-w-xs mx-auto border-2 border-dashed border-slate-300 dark:border-slate-700 bg-white/50 dark:bg-slate-900/60 rounded-2xl p-4 shadow-sm my-2">
-                    <div className="flex items-center justify-between text-[9px] text-slate-400 font-extrabold uppercase border-b border-slate-100 dark:border-slate-800 pb-1.5 mb-2.5">
+                  <div className="max-w-xs mx-auto border-2 border-dashed border-[var(--card-border)] bg-[var(--card-bg)]/60 rounded-2xl p-4 shadow-sm my-2">
+                    <div className="flex items-center justify-between text-[9px] text-slate-400 font-extrabold uppercase border-b border-[var(--card-border)] pb-1.5 mb-2.5">
                       <span className="flex items-center gap-0.5"><MapPin className="w-3 h-3 text-slate-400" /> Queue Cure</span>
                       <span className="flex items-center gap-0.5"><Calendar className="w-3 h-3 text-slate-400" /> Today</span>
                     </div>
@@ -492,20 +386,20 @@ export default function PatientPage() {
                 </div>
 
                 {/* Grid details */}
-                <div className="grid grid-cols-2 divide-x divide-slate-100 dark:divide-slate-800 border-b border-slate-100 dark:border-slate-800">
+                <div className="grid grid-cols-2 divide-x divide-[var(--card-border)] border-b border-[var(--card-border)]">
                   {/* Current Serving */}
                   <div className="p-5 text-center space-y-1">
                     <span className="text-3xs font-extrabold text-slate-400 dark:text-slate-550 uppercase tracking-wider block">
                       Currently Serving
                     </span>
-                    <span className="text-3xl font-extrabold font-mono text-teal-600 dark:text-teal-400 block animate-pulse">
+                    <span className="text-3xl font-extrabold font-mono text-teal-650 dark:text-teal-400 block animate-pulse">
                       {currentToken}
                     </span>
                   </div>
 
                   {/* Tokens Ahead */}
                   <div className="p-5 text-center space-y-1">
-                    <span className="text-3xs font-extrabold text-slate-400 dark:text-slate-550 uppercase tracking-wider block">
+                    <span className="text-3xs font-extrabold text-slate-400 dark:text-slate-555 uppercase tracking-wider block">
                       Tokens Ahead
                     </span>
                     <span className="text-3xl font-extrabold font-mono text-slate-800 dark:text-slate-100 block">
@@ -515,8 +409,8 @@ export default function PatientPage() {
                 </div>
 
                 {/* Estimated wait time */}
-                <div className="p-6 text-center bg-teal-500/5 dark:bg-teal-500/2 flex flex-col justify-center items-center">
-                  <div className="flex items-center gap-1.5 text-teal-600 dark:text-teal-400 text-xs font-extrabold uppercase tracking-wider mb-2">
+                <div className="p-6 text-center bg-[var(--clinic-primary-light)] dark:bg-[var(--clinic-primary)]/5 flex flex-col justify-center items-center">
+                  <div className="flex items-center gap-1.5 text-teal-650 dark:text-teal-450 text-xs font-extrabold uppercase tracking-wider mb-2">
                     <Timer className="w-4 h-4 animate-pulse" />
                     Estimated Wait Time
                   </div>
@@ -530,7 +424,7 @@ export default function PatientPage() {
                 </div>
 
                 {/* Render Queue Progress Visualization */}
-                <div className="p-6 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/20 dark:bg-slate-900/10">
+                <div className="p-6 border-t border-[var(--card-border)] bg-[var(--card-bg)]/20">
                   {renderQueueProgress()}
                 </div>
               </div>
@@ -538,7 +432,7 @@ export default function PatientPage() {
 
             {/* State: Token not found in active list (likely reset or invalid input) */}
             {tokenStatus === "not_found" && (
-              <div className="glass-card p-8 text-center border-amber-500/20 bg-amber-500/5 space-y-4">
+              <div className="glass-card p-8 text-center border-[var(--clinic-accent)]/20 bg-[var(--clinic-accent)]/5 space-y-4">
                 <div className="mx-auto w-12 h-12 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
                   <HelpCircle className="w-6 h-6" />
                 </div>
@@ -555,7 +449,7 @@ export default function PatientPage() {
 
             {/* Reassuring helpful notice for waiting patients */}
             {tokenStatus === "waiting" && (
-              <div className="p-4 rounded-2xl bg-white/40 dark:bg-slate-900/30 border border-slate-200/50 dark:border-slate-800 text-slate-500 dark:text-slate-450 text-[11px] text-center leading-normal font-semibold">
+              <div className="p-4 rounded-2xl bg-[var(--card-bg)]/40 border border-[var(--card-border)] text-slate-500 dark:text-slate-400 text-[11px] text-center leading-normal font-semibold">
                 🔔 <span className="text-slate-700 dark:text-slate-350">Tip:</span> {"Ensure you keep this screen open. We will update the counter in real time and trigger an alert when it's your turn."}
               </div>
             )}

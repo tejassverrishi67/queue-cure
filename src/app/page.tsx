@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import ThemeToggle from "@/components/ThemeToggle";
-import { Activity, UserPlus, Users, ArrowRight, Heart } from "lucide-react";
+import { UserPlus, Users, ArrowRight } from "lucide-react";
 
 export default function HomePage() {
   return (
@@ -17,12 +17,6 @@ export default function HomePage() {
       </div>
 
       <div className="max-w-4xl w-full text-center space-y-8 animate-slide-up">
-        {/* Brand Header */}
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-teal-500/20 bg-teal-500/5 text-teal-650 dark:text-teal-400 text-xs font-extrabold tracking-wider uppercase mb-2">
-          <Activity className="w-4 h-4 animate-pulse" />
-          {"Queue Cure '26 MVP"}
-        </div>
-        
         <div className="space-y-4">
           <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight bg-gradient-to-r from-teal-600 via-emerald-600 to-sky-600 dark:from-teal-400 dark:via-emerald-450 dark:to-sky-400 bg-clip-text text-transparent pb-1">
             Care Without the Wait
@@ -71,15 +65,6 @@ export default function HomePage() {
             </div>
           </Link>
         </div>
-
-        {/* Footer */}
-        <footer className="pt-12 text-[10px] text-slate-450 dark:text-slate-650 flex items-center justify-center gap-1.5 font-bold uppercase tracking-wider">
-          <span>Queue Cure © 2026</span>
-          <span>•</span>
-          <span>Phase 2 Clinical Core</span>
-          <span>•</span>
-          <span className="flex items-center gap-0.5"><Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500" /> Patient Experience</span>
-        </footer>
       </div>
     </div>
   );

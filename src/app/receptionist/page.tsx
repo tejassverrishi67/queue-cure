@@ -17,14 +17,14 @@ import {
   ArrowLeft, 
   RotateCcw, 
   AlertCircle,
-  CheckCircle,
   Timer,
   BarChart3,
-  UserCheck
+  UserCheck,
+  CheckCircle
 } from "lucide-react";
 
 export default function ReceptionistPage() {
-  const { socket, isConnected } = useSocket();
+  const { socket } = useSocket();
   const { addToast } = useToast();
   const [queueState, setQueueState] = useState<QueueState | null>(null);
   const [patientName, setPatientName] = useState("");
@@ -36,6 +36,7 @@ export default function ReceptionistPage() {
 
     const handleQueueUpdated = (state: QueueState) => {
       console.log("[Receptionist] Queue state updated:", state);
+      console.log(`[CLIENT]\nReceived queueUpdated\nCurrent Token: ${state.currentToken || "null"}\nQueue Length: ${state.waitingPatients.filter(p => p.status === "waiting").length}\n`);
       setQueueState(state);
     };
 
@@ -158,7 +159,7 @@ export default function ReceptionistPage() {
   return (
     <div className="flex-1 flex flex-col min-h-screen">
       {/* Navbar Header */}
-      <header className="border-b border-slate-200/80 dark:border-slate-800/80 bg-white/70 dark:bg-[#0f172a]/70 backdrop-blur-md sticky top-0 z-40 px-4 sm:px-6 py-4 transition-colors">
+      <header className="border-b border-[var(--card-border)] bg-[var(--card-bg)]/80 backdrop-blur-md sticky top-0 z-40 px-4 sm:px-6 py-4 transition-colors">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex items-center gap-3">
             <Link 
@@ -173,13 +174,6 @@ export default function ReceptionistPage() {
                 <h1 className="text-xl font-bold tracking-tight text-slate-800 dark:text-slate-100">
                   Receptionist Dashboard
                 </h1>
-                <span className="text-xs text-slate-400 font-mono hidden sm:inline">|</span>
-                <div className="flex items-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></span>
-                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                    {isConnected ? "Live Sync Active" : "Disconnected"}
-                  </span>
-                </div>
               </div>
               <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
                 {"Queue Cure '26 Clinical Core Management Portal"}
@@ -191,7 +185,7 @@ export default function ReceptionistPage() {
             <ThemeToggle />
             <button
               onClick={handleResetQueue}
-              className="px-3.5 py-2.5 rounded-xl border border-rose-500/20 bg-rose-500/5 hover:bg-rose-500/10 dark:hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-1.5 transition-all focus:ring-2 focus:ring-rose-500/20 outline-none cursor-pointer"
+              className="px-3.5 py-2.5 rounded-xl border border-rose-500/20 bg-rose-500/5 hover:bg-rose-500/10 dark:hover:bg-rose-500/20 text-rose-600 dark:text-rose-455 text-xs font-bold flex items-center gap-1.5 transition-all focus:ring-2 focus:ring-rose-500/20 outline-none cursor-pointer"
               title="Reset queue database"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -213,13 +207,13 @@ export default function ReceptionistPage() {
               Queue Status Summary
             </h2>
             <div className="grid grid-cols-2 gap-4">
-              <div className="bg-teal-500/5 border border-teal-500/10 dark:border-teal-500/20 rounded-2xl p-4 transition-colors">
+              <div className="bg-[var(--clinic-primary-light)] border border-[var(--clinic-primary)]/10 dark:border-[var(--clinic-primary)]/20 rounded-2xl p-4 transition-colors">
                 <span className="text-2xs text-teal-600 dark:text-teal-400 font-extrabold block mb-1 uppercase tracking-wider">Serving Token</span>
                 <span className="text-3xl font-extrabold font-mono text-slate-800 dark:text-slate-100">
                   {currentToken}
                 </span>
               </div>
-              <div className="bg-sky-500/5 border border-sky-500/10 dark:border-sky-500/20 rounded-2xl p-4 transition-colors">
+              <div className="bg-[var(--clinic-secondary)]/5 border border-[var(--clinic-secondary)]/10 dark:border-[var(--clinic-secondary)]/20 rounded-2xl p-4 transition-colors">
                 <span className="text-2xs text-sky-600 dark:text-sky-400 font-extrabold block mb-1 uppercase tracking-wider">Next Token</span>
                 <span className="text-3xl font-extrabold font-mono text-slate-800 dark:text-slate-100">
                   {nextToken}
@@ -231,7 +225,7 @@ export default function ReceptionistPage() {
           {/* Add Patient Form */}
           <div className="glass-card p-6">
             <h2 className="text-lg font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-2 mb-4">
-              <span className="p-1.5 rounded-lg bg-teal-500/10 text-teal-600 dark:text-teal-400 transition-colors">
+              <span className="p-1.5 rounded-lg bg-[var(--clinic-primary-light)] text-[var(--clinic-primary)] transition-colors">
                 <Plus className="w-4.5 h-4.5" />
               </span>
               Register Patient
@@ -247,7 +241,7 @@ export default function ReceptionistPage() {
                   value={patientName}
                   onChange={(e) => setPatientName(e.target.value)}
                   placeholder="Enter name (e.g. John Doe)"
-                  className="w-full px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/40 dark:bg-slate-900/40 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:border-teal-500 dark:focus:border-teal-400 focus:ring-2 focus:ring-teal-500/10 outline-none transition-all font-medium text-sm"
+                  className="w-full px-4 py-3 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)]/40 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:border-[var(--clinic-primary)] dark:focus:border-[var(--clinic-primary)] focus:ring-2 focus:ring-[var(--clinic-primary)]/10 outline-none transition-all font-medium text-sm"
                   required
                   autoComplete="off"
                 />
@@ -256,7 +250,7 @@ export default function ReceptionistPage() {
               <button
                 type="submit"
                 disabled={!patientName.trim()}
-                className="w-full py-3.5 px-4 rounded-2xl bg-teal-600 hover:bg-teal-700 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 dark:disabled:text-slate-600 text-white font-extrabold text-sm shadow-lg shadow-teal-500/10 hover:shadow-teal-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed border-none"
+                className="w-full py-3.5 px-4 rounded-2xl bg-[var(--clinic-primary)] hover:bg-[var(--clinic-primary-hover)] disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 dark:disabled:text-slate-600 text-white font-extrabold text-sm shadow-lg shadow-teal-500/10 hover:shadow-teal-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed border-none font-bold"
               >
                 <Plus className="w-4.5 h-4.5" />
                 Add to Queue
@@ -270,7 +264,7 @@ export default function ReceptionistPage() {
           {/* Queue Controls */}
           <div className="glass-card p-6 space-y-4">
             <h2 className="text-lg font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-              <span className="p-1.5 rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-400 transition-colors">
+              <span className="p-1.5 rounded-lg bg-[var(--clinic-secondary)]/10 text-[var(--clinic-secondary)] transition-colors">
                 <UserCheck className="w-4.5 h-4.5" />
               </span>
               Queue Controls
@@ -279,14 +273,14 @@ export default function ReceptionistPage() {
             <button
               onClick={handleCallNext}
               disabled={waitingPatients.length === 0}
-              className="w-full py-4 px-4 rounded-2xl bg-gradient-to-r from-sky-600 to-teal-600 hover:from-sky-700 hover:to-teal-700 disabled:from-slate-200 dark:disabled:from-slate-800 disabled:to-slate-200 dark:disabled:to-slate-800 disabled:text-slate-400 dark:disabled:text-slate-600 text-white font-extrabold text-base shadow-xl shadow-sky-500/10 hover:shadow-sky-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed border-none"
+              className="w-full py-4 px-4 rounded-2xl bg-gradient-to-r from-sky-600 to-teal-650 hover:from-sky-700 hover:to-teal-700 disabled:from-slate-200 dark:disabled:from-slate-800 disabled:to-slate-200 dark:disabled:to-slate-800 disabled:text-slate-400 dark:disabled:text-slate-655 text-white font-extrabold text-base shadow-xl shadow-sky-500/10 hover:shadow-sky-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed border-none"
             >
               Call Next Patient
               <ChevronRight className="w-5 h-5" />
             </button>
 
             {waitingPatients.length === 0 && (
-              <div className="flex items-center gap-2.5 p-3.5 rounded-2xl border border-amber-500/20 bg-amber-500/5 text-amber-600 dark:text-amber-400 text-xs font-semibold">
+              <div className="flex items-center gap-2.5 p-3.5 rounded-2xl border border-[var(--clinic-accent)]/20 bg-[var(--clinic-accent)]/5 text-[var(--clinic-accent)] text-xs font-semibold">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>The waiting list is currently empty.</span>
               </div>
@@ -296,7 +290,7 @@ export default function ReceptionistPage() {
           {/* Configuration Settings */}
           <div className="glass-card p-6 space-y-4">
             <h2 className="text-sm font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
-              <Timer className="w-4 h-4 text-slate-400" />
+              <Timer className="w-4 h-4 text-slate-450" />
               Consultation Settings
             </h2>
             
@@ -310,12 +304,12 @@ export default function ReceptionistPage() {
                   type="button"
                   onClick={() => handleUpdateConsultationTime(avgConsultation - 1)}
                   disabled={avgConsultation <= 1}
-                  className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 flex items-center justify-center font-extrabold border border-slate-200/50 dark:border-slate-700/50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  className="w-10 h-10 rounded-xl bg-[var(--card-bg)]/80 hover:bg-[var(--card-bg)] border border-[var(--card-border)] text-slate-800 dark:text-slate-200 flex items-center justify-center font-extrabold transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                 >
                   -
                 </button>
                 
-                <div className="flex-1 flex items-center justify-center border border-slate-200 dark:border-slate-800 rounded-xl bg-white/40 dark:bg-slate-900/40 h-10 px-3">
+                <div className="flex-1 flex items-center justify-center border border-[var(--card-border)] rounded-xl bg-[var(--card-bg)]/40 h-10 px-3">
                   <input
                     type="number"
                     min="1"
@@ -329,7 +323,7 @@ export default function ReceptionistPage() {
                 <button
                   type="button"
                   onClick={() => handleUpdateConsultationTime(avgConsultation + 1)}
-                  className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 flex items-center justify-center font-extrabold border border-slate-200/50 dark:border-slate-700/50 transition-colors cursor-pointer"
+                  className="w-10 h-10 rounded-xl bg-[var(--card-bg)]/80 hover:bg-[var(--card-bg)] border border-[var(--card-border)] text-slate-800 dark:text-slate-200 flex items-center justify-center font-extrabold transition-colors cursor-pointer"
                 >
                   +
                 </button>
@@ -349,22 +343,22 @@ export default function ReceptionistPage() {
               Live Clinic Analytics
             </h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="border border-slate-200/60 dark:border-slate-800 bg-white/30 dark:bg-slate-900/30 rounded-2xl p-4">
+              <div className="border border-[var(--card-border)] bg-[var(--card-bg)]/30 rounded-2xl p-4">
                 <span className="text-[10px] text-slate-400 dark:text-slate-500 font-extrabold block mb-1 uppercase tracking-wider">Served Today</span>
                 <span className="text-2xl font-extrabold text-slate-800 dark:text-slate-100">{patientsServedCount}</span>
               </div>
-              <div className="border border-slate-200/60 dark:border-slate-800 bg-white/30 dark:bg-slate-900/30 rounded-2xl p-4">
-                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-extrabold block mb-1 uppercase tracking-wider">Queue Length</span>
+              <div className="border border-[var(--card-border)] bg-[var(--card-bg)]/30 rounded-2xl p-4">
+                <span className="text-[10px] text-slate-400 dark:text-slate-550 font-extrabold block mb-1 uppercase tracking-wider">Queue Length</span>
                 <span className="text-2xl font-extrabold text-slate-800 dark:text-slate-100">{queueLength}</span>
               </div>
-              <div className="border border-slate-200/60 dark:border-slate-800 bg-white/30 dark:bg-slate-900/30 rounded-2xl p-4">
-                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-extrabold block mb-1 uppercase tracking-wider">Avg Wait Time</span>
+              <div className="border border-[var(--card-border)] bg-[var(--card-bg)]/30 rounded-2xl p-4">
+                <span className="text-[10px] text-slate-400 dark:text-slate-550 font-extrabold block mb-1 uppercase tracking-wider">Avg Wait Time</span>
                 <span className="text-2xl font-extrabold text-slate-800 dark:text-slate-100">
                   {avgEstimatedWait} <span className="text-xs font-bold text-slate-400">mins</span>
                 </span>
               </div>
-              <div className="border border-slate-200/60 dark:border-slate-800 bg-white/30 dark:bg-slate-900/30 rounded-2xl p-4">
-                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-extrabold block mb-1 uppercase tracking-wider">Consult Duration</span>
+              <div className="border border-[var(--card-border)] bg-[var(--card-bg)]/30 rounded-2xl p-4">
+                <span className="text-[10px] text-slate-400 dark:text-slate-550 font-extrabold block mb-1 uppercase tracking-wider">Consult Duration</span>
                 <span className="text-2xl font-extrabold text-slate-800 dark:text-slate-100">
                   {avgConsultation} <span className="text-xs font-bold text-slate-400">mins</span>
                 </span>
@@ -377,9 +371,9 @@ export default function ReceptionistPage() {
             
             {/* Waiting Queue List */}
             <div className="glass-card flex flex-col overflow-hidden max-h-[500px]">
-              <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-850 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/20">
+              <div className="px-5 py-4 border-b border-[var(--card-border)] flex items-center justify-between bg-[var(--card-bg)]/20">
                 <div className="flex items-center gap-2">
-                  <Users className="w-4.5 h-4.5 text-teal-600 dark:text-teal-400" />
+                  <Users className="w-4.5 h-4.5 text-[var(--clinic-primary)]" />
                   <h3 className="font-extrabold text-slate-850 dark:text-slate-100 text-sm">
                     Waiting List
                   </h3>
@@ -390,9 +384,9 @@ export default function ReceptionistPage() {
               </div>
 
               {/* Scrollable list */}
-              <div className="flex-1 overflow-y-auto p-4 divide-y divide-slate-100 dark:divide-slate-800/40">
+              <div className="flex-1 overflow-y-auto p-4 divide-y divide-[var(--card-border)]/40">
                 {waitingPatients.length === 0 ? (
-                  <div className="h-full flex flex-col justify-center items-center text-center py-16 text-slate-400 space-y-3">
+                  <div className="h-full flex flex-col justify-center items-center text-center py-16 text-slate-405 space-y-3">
                     <Activity className="w-8 h-8 text-slate-300 dark:text-slate-700 animate-pulse" />
                     <div>
                       <p className="font-bold text-xs text-slate-500 dark:text-slate-400">Queue is Clear</p>
@@ -408,7 +402,7 @@ export default function ReceptionistPage() {
                         className="py-3 first:pt-0 last:pb-0 flex items-center justify-between gap-3 animate-fade-in"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="h-10 w-14 bg-teal-500/10 dark:bg-teal-500/20 text-teal-700 dark:text-teal-400 rounded-xl flex items-center justify-center font-extrabold font-mono text-sm tracking-wide border border-teal-500/10">
+                          <div className="h-10 w-14 bg-[var(--clinic-primary)]/10 text-[var(--clinic-primary)] rounded-xl flex items-center justify-center font-extrabold font-mono text-sm tracking-wide border border-[var(--clinic-primary)]/20">
                             {patient.tokenNumber}
                           </div>
                           <div>
@@ -428,11 +422,11 @@ export default function ReceptionistPage() {
                               Next Up
                             </span>
                           ) : (
-                            <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[9px] font-bold">
+                            <span className="px-2 py-0.5 rounded bg-[var(--card-bg)] border border-[var(--card-border)] text-slate-500 dark:text-slate-400 text-[9px] font-bold">
                               Waiting
                             </span>
                           )}
-                          <span className="text-[10px] text-slate-500 dark:text-slate-450 font-bold flex items-center gap-0.5">
+                          <span className="text-[10px] text-slate-550 dark:text-slate-450 font-bold flex items-center gap-0.5">
                             <Timer className="w-3 h-3 text-slate-400" />
                             {waitTime} min
                           </span>
@@ -446,7 +440,7 @@ export default function ReceptionistPage() {
 
             {/* Called Patients History (Audit Log) */}
             <div className="glass-card flex flex-col overflow-hidden max-h-[500px]">
-              <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-850 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/20">
+              <div className="px-5 py-4 border-b border-[var(--card-border)] flex items-center justify-between bg-[var(--card-bg)]/20">
                 <div className="flex items-center gap-2">
                   <CheckCircle className="w-4.5 h-4.5 text-slate-500" />
                   <h3 className="font-extrabold text-slate-850 dark:text-slate-100 text-sm">
@@ -459,7 +453,7 @@ export default function ReceptionistPage() {
               </div>
 
               {/* Scrollable list */}
-              <div className="flex-1 overflow-y-auto p-4 divide-y divide-slate-100 dark:divide-slate-800/40">
+              <div className="flex-1 overflow-y-auto p-4 divide-y divide-[var(--card-border)]/40">
                 {sortedCalledPatients.length === 0 ? (
                   <div className="h-full flex flex-col justify-center items-center text-center py-16 text-slate-400">
                     <Clock className="w-8 h-8 text-slate-350 dark:text-slate-700 mb-2" />
@@ -473,7 +467,7 @@ export default function ReceptionistPage() {
                       className="py-3.5 first:pt-0 last:pb-0 flex items-center justify-between gap-3 text-xs animate-fade-in"
                     >
                       <div className="flex items-center gap-3">
-                        <span className="font-bold font-mono text-xs text-slate-650 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200/40 dark:border-slate-700/40">
+                        <span className="font-bold font-mono text-xs text-slate-650 dark:text-slate-400 bg-[var(--card-bg)] px-2 py-0.5 rounded border border-[var(--card-border)]">
                           {patient.tokenNumber}
                         </span>
                         <div>
@@ -486,7 +480,7 @@ export default function ReceptionistPage() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <span className="px-2 py-0.5 rounded bg-teal-500/10 text-teal-600 dark:text-teal-400 text-[9px] font-extrabold tracking-wider uppercase block mb-1">
+                        <span className="px-2 py-0.5 rounded bg-[var(--clinic-primary)]/10 text-[var(--clinic-primary)] text-[9px] font-extrabold tracking-wider uppercase block mb-1">
                           Called
                         </span>
                         <span className="text-[10px] text-slate-400 dark:text-slate-450 font-bold">
