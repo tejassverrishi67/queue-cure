@@ -294,34 +294,48 @@ class SupabaseQueueManager {
 
   async sendAction<K extends keyof ActionPayloadMap>(event: K, data?: ActionPayloadMap[K]) {
     if (!supabase) {
-      console.warn(`[SupabaseQueue] Supabase client is not available. Cannot send action: ${event}`);
-      return;
+      throw new Error("Database connection is offline. Please check your configuration.");
     }
 
     if (event === "queueUpdated") {
-      this.fetchAndPublishState();
+      await this.fetchAndPublishState();
       return;
     }
 
     if (event === "patientAdded") {
       const payload = data as { name: string };
-      if (!payload || !payload.name) return;
+      if (!payload || !payload.name) {
+        throw new Error("Patient name is required.");
+      }
       const name = payload.name.trim();
+      if (!name) {
+        throw new Error("Patient name cannot be empty or blank space.");
+      }
 
       try {
-        const { data: settings } = await supabase
+        const { data: settings, error: settingsError } = await supabase
           .from("queue_settings")
           .select("last_token_index")
           .eq("id", 1)
           .single();
 
+        if (settingsError) {
+          console.error("[SupabaseQueue] Error retrieving token settings:", settingsError);
+          throw new Error("Failed to retrieve queue settings from database.");
+        }
+
         const nextIndex = (settings?.last_token_index ?? 0) + 1;
         const newToken = `A${String(nextIndex).padStart(3, "0")}`;
 
-        await supabase
+        const { error: updateError } = await supabase
           .from("queue_settings")
           .update({ last_token_index: nextIndex })
           .eq("id", 1);
+
+        if (updateError) {
+          console.error("[SupabaseQueue] Error incrementing token index:", updateError);
+          throw new Error("Failed to generate a new token number.");
+        }
 
         const { error: insertError } = await supabase
           .from("patients")
@@ -334,7 +348,7 @@ class SupabaseQueueManager {
 
         if (insertError) {
           console.error("[SupabaseQueue] Error registering patient:", insertError);
-          return;
+          throw new Error(insertError.message || "Failed to register patient in database.");
         }
 
         if (this.channel) {
@@ -349,6 +363,7 @@ class SupabaseQueueManager {
         await this.fetchAndPublishState();
       } catch (err) {
         console.error("[SupabaseQueue] Failed to process patientAdded event:", err);
+        throw err;
       }
     }
 
@@ -381,7 +396,7 @@ class SupabaseQueueManager {
 
         if (res.error) {
           console.error("[SupabaseQueue] Error searching next waiting patient:", res.error);
-          return;
+          throw new Error("Failed to query next patient in queue.");
         }
 
         const nextPatient = res.data;
@@ -390,15 +405,25 @@ class SupabaseQueueManager {
           const calledAt = new Date().toISOString();
           const currentToken = nextPatient.token_number;
 
-          await supabase
+          const { error: patientError } = await supabase
             .from("patients")
             .update({ status: "called", called_at: calledAt })
             .eq("id", nextPatient.id);
 
-          await supabase
+          if (patientError) {
+            console.error("[SupabaseQueue] Error setting patient status to called:", patientError);
+            throw new Error("Failed to advance patient status.");
+          }
+
+          const { error: settingsError } = await supabase
             .from("queue_settings")
             .update({ current_token: currentToken })
             .eq("id", 1);
+
+          if (settingsError) {
+            console.error("[SupabaseQueue] Error setting current token index:", settingsError);
+            throw new Error("Failed to update active serving token settings.");
+          }
 
           if (this.channel) {
             this.channel.send({
@@ -410,23 +435,35 @@ class SupabaseQueueManager {
 
           this.dispatch("tokenAdvanced", { currentToken, patientName: nextPatient.name });
           await this.fetchAndPublishState();
+        } else {
+          throw new Error("No patients are waiting in the queue.");
         }
       } catch (err) {
         console.error("[SupabaseQueue] Failed to process tokenAdvanced event:", err);
+        throw err;
       }
     }
 
     if (event === "consultationTimeUpdated") {
       const payload = data as { minutes: number };
-      if (!payload || typeof payload.minutes === "undefined") return;
+      if (!payload || typeof payload.minutes === "undefined") {
+        throw new Error("Minutes value is required.");
+      }
       const mins = parseInt(String(payload.minutes), 10);
-      if (isNaN(mins) || mins < 1) return;
+      if (isNaN(mins) || mins < 1 || mins > 60) {
+        throw new Error("Consultation time must be between 1 and 60 minutes.");
+      }
 
       try {
-        await supabase
+        const { error } = await supabase
           .from("queue_settings")
           .update({ average_consultation_time: mins })
           .eq("id", 1);
+
+        if (error) {
+          console.error("[SupabaseQueue] Error setting average consultation time:", error);
+          throw new Error("Failed to save consultation settings.");
+        }
 
         if (this.channel) {
           this.channel.send({
@@ -440,16 +477,68 @@ class SupabaseQueueManager {
         await this.fetchAndPublishState();
       } catch (err) {
         console.error("[SupabaseQueue] Failed to update average consultation time settings:", err);
+        throw err;
       }
     }
 
     if (event === "emergencyRequestSubmitted") {
       const payload = data as { tokenNumber: string; reason: string };
-      if (!payload || !payload.tokenNumber || !payload.reason) return;
-      const { tokenNumber, reason } = payload;
+      if (!payload || !payload.tokenNumber || !payload.reason) {
+        throw new Error("Token number and emergency reason are required.");
+      }
+      const tokenNumber = payload.tokenNumber.trim().toUpperCase();
+      const reason = payload.reason.trim();
+
+      if (!tokenNumber) {
+        throw new Error("Patient token number cannot be empty.");
+      }
+      if (!reason) {
+        throw new Error("Emergency reason cannot be empty.");
+      }
+      if (reason.length > 250) {
+        throw new Error("Emergency reason must not exceed 250 characters.");
+      }
 
       try {
-        const { error } = await supabase
+        // 1. Check if a pending emergency request already exists for the same token
+        const { data: existingRequests, error: checkError } = await supabase
+          .from("emergency_requests")
+          .select("id")
+          .eq("token_number", tokenNumber)
+          .eq("status", "pending")
+          .limit(1);
+
+        if (checkError) {
+          console.error("[SupabaseQueue] Error checking for existing emergency request:", checkError);
+          throw new Error("Failed to check for existing emergency requests.");
+        }
+
+        if (existingRequests && existingRequests.length > 0) {
+          throw new Error("An emergency request is already awaiting review.");
+        }
+
+        // 2. Validate that patient actually exists and is waiting
+        const { data: patient, error: patientError } = await supabase
+          .from("patients")
+          .select("status")
+          .eq("token_number", tokenNumber)
+          .maybeSingle();
+
+        if (patientError) {
+          console.error("[SupabaseQueue] Error verifying patient token:", patientError);
+          throw new Error("Failed to verify patient token registration.");
+        }
+
+        if (!patient) {
+          throw new Error("Token number is not registered in the active queue.");
+        }
+
+        if (patient.status !== "waiting") {
+          throw new Error("This token has already been called.");
+        }
+
+        // 3. Insert the new emergency request row
+        const { error: insertError } = await supabase
           .from("emergency_requests")
           .insert({
             token_number: tokenNumber,
@@ -458,9 +547,9 @@ class SupabaseQueueManager {
             created_at: new Date().toISOString()
           });
 
-        if (error) {
-          console.error("[SupabaseQueue] Error creating emergency request:", error);
-          return;
+        if (insertError) {
+          console.error("[SupabaseQueue] Error creating emergency request:", insertError);
+          throw new Error("Failed to submit emergency request.");
         }
 
         if (this.emergencyChannel) {
@@ -475,48 +564,45 @@ class SupabaseQueueManager {
         await this.fetchAndPublishState();
       } catch (err) {
         console.error("[SupabaseQueue] Failed to submit emergency request:", err);
+        throw err;
       }
     }
 
     if (event === "emergencyRequestReviewed") {
       const payload = data as { requestId: string; tokenNumber: string; status: "approved" | "rejected" };
-      if (!payload || !payload.requestId || !payload.tokenNumber || !payload.status) return;
+      if (!payload || !payload.requestId || !payload.tokenNumber || !payload.status) {
+        throw new Error("Request details are missing.");
+      }
       const { requestId, tokenNumber, status } = payload;
 
       try {
         const reviewedAt = new Date().toISOString();
 
         // 1. Update emergency request status
-        try {
-          const { error: requestError } = await supabase
-            .from("emergency_requests")
-            .update({
-              status,
-              reviewed_at: reviewedAt
-            })
-            .eq("id", requestId);
+        const { error: requestError } = await supabase
+          .from("emergency_requests")
+          .update({
+            status,
+            reviewed_at: reviewedAt
+          })
+          .eq("id", requestId);
 
-          if (requestError) {
-            console.warn("[SupabaseQueue] Warning: Error updating emergency request status:", requestError);
-          }
-        } catch (dbErr) {
-          console.warn("[SupabaseQueue] Exception updating emergency request:", dbErr);
+        if (requestError) {
+          console.error("[SupabaseQueue] Error updating emergency request status:", requestError);
+          throw new Error("Failed to update emergency request status.");
         }
 
         // 2. If approved, mark patient as emergency in patients table
         if (status === "approved") {
-          try {
-            const { error: patientError } = await supabase
-              .from("patients")
-              .update({ is_emergency: true })
-              .eq("token_number", tokenNumber)
-              .eq("status", "waiting"); // Only waiting patients can be set to emergency
+          const { error: patientError } = await supabase
+            .from("patients")
+            .update({ is_emergency: true })
+            .eq("token_number", tokenNumber)
+            .eq("status", "waiting"); // Only waiting patients can be set to emergency
 
-            if (patientError) {
-              console.warn("[SupabaseQueue] Warning: Error setting patient emergency status:", patientError);
-            }
-          } catch (dbErr) {
-            console.warn("[SupabaseQueue] Exception setting patient emergency status:", dbErr);
+          if (patientError) {
+            console.error("[SupabaseQueue] Error setting patient emergency status:", patientError);
+            throw new Error("Failed to apply emergency status to patient.");
           }
         }
 
@@ -532,28 +618,45 @@ class SupabaseQueueManager {
         await this.fetchAndPublishState();
       } catch (err) {
         console.error("[SupabaseQueue] Failed to review emergency request:", err);
+        throw err;
       }
     }
 
     if (event === "queueReset") {
       try {
-        // Clear emergency requests table (isolated query)
-        try {
-          await supabase.from("emergency_requests").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-        } catch (emergencyErr) {
+        // Clear emergency requests table
+        const { error: emergencyErr } = await supabase
+          .from("emergency_requests")
+          .delete()
+          .neq("id", "00000000-0000-0000-0000-000000000000");
+
+        if (emergencyErr) {
           console.warn("[SupabaseQueue] Warning: Failed to clear emergency requests:", emergencyErr);
         }
 
         // Clear patients table
-        await supabase.from("patients").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+        const { error: patientsErr } = await supabase
+          .from("patients")
+          .delete()
+          .neq("id", "00000000-0000-0000-0000-000000000000");
 
-        await supabase
+        if (patientsErr) {
+          console.error("[SupabaseQueue] Error clearing patients:", patientsErr);
+          throw new Error("Failed to clear patients queue.");
+        }
+
+        const { error: settingsErr } = await supabase
           .from("queue_settings")
           .update({
             current_token: null,
             last_token_index: 0
           })
           .eq("id", 1);
+
+        if (settingsErr) {
+          console.error("[SupabaseQueue] Error resetting queue settings:", settingsErr);
+          throw new Error("Failed to reset index settings.");
+        }
 
         if (this.channel) {
           this.channel.send({
@@ -566,6 +669,7 @@ class SupabaseQueueManager {
         await this.fetchAndPublishState();
       } catch (err) {
         console.error("[SupabaseQueue] Failed to process queueReset event:", err);
+        throw err;
       }
     }
   }

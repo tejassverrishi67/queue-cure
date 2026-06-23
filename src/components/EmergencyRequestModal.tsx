@@ -33,6 +33,7 @@ export default function EmergencyRequestModal({
   // Sync token value when modal opens or initialToken changes
   useEffect(() => {
     if (isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTokenNumber(initialToken);
       setReason("");
       // Autofocus the textarea
@@ -124,7 +125,7 @@ export default function EmergencyRequestModal({
         <form onSubmit={handleSubmit} className="mt-4 space-y-4 flex-1">
           {/* Token Input */}
           <div>
-            <label className="block text-2xs font-extrabold text-slate-500 dark:text-slate-450 uppercase tracking-wider mb-2">
+            <label className="block text-2xs font-extrabold text-slate-500 dark:text-slate-455 uppercase tracking-wider mb-2">
               Patient Token Number
             </label>
             <input
@@ -132,7 +133,7 @@ export default function EmergencyRequestModal({
               value={tokenNumber}
               onChange={(e) => setTokenNumber(e.target.value)}
               placeholder="e.g. A001"
-              disabled={!!initialToken}
+              disabled={!!initialToken || isSubmitting}
               className="w-full px-4 py-3 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)]/40 text-slate-800 dark:text-slate-100 disabled:opacity-75 disabled:bg-slate-50 dark:disabled:bg-slate-900/50 font-extrabold font-mono tracking-wider focus:border-rose-500 focus:ring-2 focus:ring-rose-500/10 outline-none transition-all text-sm uppercase"
               required
             />
@@ -146,7 +147,7 @@ export default function EmergencyRequestModal({
           {/* Reason Input */}
           <div>
             <div className="flex justify-between items-center mb-2">
-              <label className="block text-2xs font-extrabold text-slate-500 dark:text-slate-450 uppercase tracking-wider">
+              <label className="block text-2xs font-extrabold text-slate-500 dark:text-slate-455 uppercase tracking-wider">
                 Emergency Reason <span className="text-rose-500 font-bold">*</span>
               </label>
               <span
@@ -168,7 +169,8 @@ export default function EmergencyRequestModal({
               placeholder="Describe the medical emergency (e.g. Sharp pain in central chest radiating to arm)"
               rows={4}
               maxLength={300} // allow slightly more for count overflow indication
-              className={`w-full px-4 py-3.5 rounded-2xl border bg-[var(--card-bg)]/40 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:ring-2 outline-none transition-all text-xs font-semibold leading-relaxed ${
+              disabled={isSubmitting}
+              className={`w-full px-4 py-3.5 rounded-2xl border bg-[var(--card-bg)]/40 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:ring-2 outline-none transition-all text-xs font-semibold leading-relaxed disabled:opacity-75 disabled:cursor-not-allowed ${
                 characterCount > 250
                   ? "border-rose-500 focus:ring-rose-500/10 focus:border-rose-500"
                   : "border-[var(--card-border)] focus:border-rose-500 focus:ring-rose-500/10"
@@ -193,7 +195,8 @@ export default function EmergencyRequestModal({
                   key={txt}
                   type="button"
                   onClick={() => selectQuickReason(txt)}
-                  className={`px-3 py-1.5 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 hover:bg-rose-500/5 dark:bg-slate-900/30 dark:hover:bg-rose-500/5 text-[11px] font-bold text-slate-650 dark:text-slate-350 hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-500/20 active:scale-95 transition-all cursor-pointer ${
+                  disabled={isSubmitting}
+                  className={`px-3 py-1.5 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 hover:bg-rose-500/5 dark:bg-slate-900/30 dark:hover:bg-rose-500/5 text-[11px] font-bold text-slate-650 dark:text-slate-350 hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-500/20 active:scale-95 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                     reason === txt ? "border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400" : ""
                   }`}
                 >

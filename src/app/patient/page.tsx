@@ -4,8 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { 
   useRealtimeQueue, 
-  QueueState,
-  Patient
+  QueueState
 } from "@/hooks/useRealtimeQueue";
 import ThemeToggle from "@/components/ThemeToggle";
 import { useToast } from "@/components/Toast";
@@ -43,34 +42,46 @@ export default function PatientPage() {
     if (!queueManager) return;
 
     const handleQueueUpdated = (state: QueueState) => {
-      console.log("[Patient] Queue state updated:", state);
-      console.log(`[CLIENT]\nReceived queueUpdated\nCurrent Token: ${state.currentToken || "null"}\nQueue Length: ${state.waitingPatients.filter(p => p.status === "waiting").length}\n`);
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Patient] Queue state updated:", state);
+        console.log(`[CLIENT]\nReceived queueUpdated\nCurrent Token: ${state.currentToken || "null"}\nQueue Length: ${state.waitingPatients.filter(p => p.status === "waiting").length}\n`);
+      }
       setQueueState(state);
     };
 
     const handleTokenAdvanced = (data: { currentToken: string; patientName: string }) => {
-      console.log("[Patient] Token advanced:", data);
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Patient] Token advanced:", data);
+      }
       
       // Display general call toast
       addToast(`Token Called: ${data.currentToken}`, "info");
     };
 
     const handleQueueReset = () => {
-      console.log("[Patient] Queue database reset");
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Patient] Queue database reset");
+      }
       addToast("Queue state has been reset by the clinic", "warning");
     };
 
     const handleConsultationTimeUpdated = (data: { minutes: number }) => {
-      console.log("[Patient] Clinic consultation time updated:", data);
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Patient] Clinic consultation time updated:", data);
+      }
       addToast(`Estimated wait durations adjusted.`, "info");
     };
 
     const handleEmergencyRequestSubmitted = (data: { tokenNumber: string; reason: string }) => {
-      console.log("[Patient] Emergency request submitted broadcast:", data);
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Patient] Emergency request submitted broadcast:", data);
+      }
     };
 
     const handleEmergencyRequestReviewed = (data: { tokenNumber: string; status: "approved" | "rejected" }) => {
-      console.log("[Patient] Emergency request reviewed broadcast:", data);
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Patient] Emergency request reviewed broadcast:", data);
+      }
       if (data.tokenNumber === myTokenRef.current) {
         if (data.status === "approved") {
           addToast("Your emergency priority request has been APPROVED!", "success");
@@ -582,10 +593,34 @@ export default function PatientPage() {
         initialToken={myToken || ""}
         onSubmit={async (token, reason) => {
           if (!queueManager) return;
-          await queueManager.sendAction("emergencyRequestSubmitted", {
-            tokenNumber: token,
-            reason: reason
-          });
+
+          const formattedToken = token.trim().toUpperCase();
+          
+          // Client-side duplicate check
+          const pendingExists = queueState?.emergencyRequests?.some(
+            req => req.tokenNumber === formattedToken && req.status === "pending"
+          );
+          if (pendingExists) {
+            addToast("An emergency request is already awaiting review.", "warning");
+            throw new Error("An emergency request is already awaiting review.");
+          }
+
+          try {
+            await queueManager.sendAction("emergencyRequestSubmitted", {
+              tokenNumber: formattedToken,
+              reason: reason
+            });
+            addToast("Emergency priority request submitted successfully.", "success");
+          } catch (err) {
+            const error = err as Error;
+            const errMsg = error.message || "";
+            if (errMsg.includes("already awaiting review")) {
+              addToast("An emergency request is already awaiting review.", "warning");
+            } else {
+              addToast(errMsg || "Failed to submit emergency request", "error");
+            }
+            throw err;
+          }
         }}
       />
     </div>

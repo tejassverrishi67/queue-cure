@@ -42,44 +42,65 @@ export default function ReceptionistPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
+  // Action Loading States
+  const [isAddingPatient, setIsAddingPatient] = useState(false);
+  const [isCallingNext, setIsCallingNext] = useState(false);
+  const [isUpdatingConsultTime, setIsUpdatingConsultTime] = useState(false);
+  const [isResettingQueue, setIsResettingQueue] = useState(false);
+  const [reviewingRequestIds, setReviewingRequestIds] = useState<Record<string, boolean>>({});
+
   // Sync state on updates with complete lifecycle cleanup
   useEffect(() => {
     if (!queueManager) return;
 
     const handleQueueUpdated = (state: QueueState) => {
-      console.log("[Receptionist] Queue state updated:", state);
-      console.log(`[CLIENT]\nReceived queueUpdated\nCurrent Token: ${state.currentToken || "null"}\nQueue Length: ${state.waitingPatients.filter(p => p.status === "waiting").length}\n`);
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Receptionist] Queue state updated:", state);
+        console.log("[CLIENT]\nReceived queueUpdated\nCurrent Token: " + (state.currentToken || "null") + "\nQueue Length: " + state.waitingPatients.filter(p => p.status === "waiting").length + "\n");
+      }
       setQueueState(state);
     };
 
     const handlePatientAdded = (data: { name: string; tokenNumber: string }) => {
-      console.log("[Receptionist] Patient added:", data);
-      addToast(`Patient registered: ${data.name} (${data.tokenNumber})`, "success");
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Receptionist] Patient added:", data);
+      }
+      addToast("Patient registered: " + data.name + " (" + data.tokenNumber + ")", "success");
     };
 
     const handleTokenAdvanced = (data: { currentToken: string; patientName: string }) => {
-      console.log("[Receptionist] Token called:", data);
-      addToast(`Called next patient: ${data.patientName} (${data.currentToken})`, "info");
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Receptionist] Token called:", data);
+      }
+      addToast("Called next patient: " + data.patientName + " (" + data.currentToken + ")", "info");
     };
 
     const handleQueueReset = () => {
-      console.log("[Receptionist] Queue database reset");
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Receptionist] Queue database reset");
+      }
       addToast("Queue database cleared successfully", "warning");
     };
 
     const handleConsultationTimeUpdated = (data: { minutes: number }) => {
-      console.log("[Receptionist] Average consultation time updated:", data);
-      addToast(`Consultation duration set to ${data.minutes} mins`, "info");
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Receptionist] Average consultation time updated:", data);
+      }
+      addToast("Consultation duration set to " + data.minutes + " mins", "info");
     };
 
     const handleEmergencyRequestSubmitted = (data: { tokenNumber: string; reason: string }) => {
-      console.log("[Receptionist] Emergency request submitted broadcast:", data);
-      addToast(`🚨 Emergency request submitted for Token ${data.tokenNumber}!`, "error");
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Receptionist] Emergency request submitted broadcast:", data);
+      }
+      addToast("🚨 Emergency request submitted for Token " + data.tokenNumber + "!", "error");
     };
 
     const handleEmergencyRequestReviewed = (data: { tokenNumber: string; status: "approved" | "rejected" }) => {
-      console.log("[Receptionist] Emergency request reviewed broadcast:", data);
-      addToast(`Emergency request for ${data.tokenNumber} ${data.status}.`, data.status === "approved" ? "success" : "info");
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Receptionist] Emergency request reviewed broadcast:", data);
+      }
+      addToast("Emergency request for " + data.tokenNumber + " " + data.status + ".", data.status === "approved" ? "success" : "info");
     };
 
     // Subscriptions
@@ -109,6 +130,7 @@ export default function ReceptionistPage() {
   // Check auth session storage on mount to avoid server-side render mismatch
   useEffect(() => {
     const adminSession = sessionStorage.getItem("isAdmin");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoggedIn(adminSession === "true");
   }, []);
 
@@ -155,49 +177,95 @@ export default function ReceptionistPage() {
     setUsername("");
     setPassword("");
     addToast("Logged out successfully", "info");
-  };
-
-  // Form submission: Add patient
-  const handleAddPatient = (e: React.FormEvent) => {
+  };  // Form submission: Add patient
+  const handleAddPatient = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!patientName.trim() || !queueManager) return;
+    const trimmedName = patientName.trim();
+    if (!trimmedName || !queueManager || isAddingPatient) return;
 
-    queueManager.sendAction("patientAdded", { name: patientName });
-    
-    // Clear and refocus input instantly
-    setPatientName("");
-    setTimeout(() => {
-      inputRef.current?.focus();
-    }, 10);
-  };
-
-  // Call Next Patient
-  const handleCallNext = () => {
-    if (!queueManager) return;
-    queueManager.sendAction("tokenAdvanced");
-  };
-
-  // Update Consultation Time
-  const handleUpdateConsultationTime = (val: number) => {
-    if (!queueManager || val < 1) return;
-    queueManager.sendAction("consultationTimeUpdated", { minutes: val });
-  };
-
-  // Reset Queue
-  const handleResetQueue = () => {
-    if (!queueManager) return;
-    if (confirm("Are you sure you want to reset the queue state and clear all patient records?")) {
-      queueManager.sendAction("queueReset");
+    setIsAddingPatient(true);
+    try {
+      await queueManager.sendAction("patientAdded", { name: trimmedName });
+      setPatientName("");
+      // Success toast is already handled in useEffect for handlePatientAdded broadcast, so we don't duplicate it here.
+    } catch (err) {
+      const error = err as Error;
+      addToast(error.message || "Failed to register patient.", "error");
+    } finally {
+      setIsAddingPatient(false);
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 10);
     }
   };
 
-  const handleReviewEmergency = (requestId: string, tokenNumber: string, status: "approved" | "rejected") => {
-    if (!queueManager) return;
-    queueManager.sendAction("emergencyRequestReviewed", {
-      requestId,
-      tokenNumber,
-      status
-    });
+  // Call Next Patient
+  const handleCallNext = async () => {
+    if (!queueManager || isCallingNext) return;
+    setIsCallingNext(true);
+    try {
+      await queueManager.sendAction("tokenAdvanced");
+    } catch (err) {
+      const error = err as Error;
+      addToast(error.message || "Failed to call next patient.", "error");
+    } finally {
+      setIsCallingNext(false);
+    }
+  };
+
+  // Update Consultation Time
+  const handleUpdateConsultationTime = async (val: number) => {
+    if (!queueManager || isUpdatingConsultTime) return;
+    if (val < 1 || val > 60) {
+      addToast("Consultation time must be between 1 and 60 minutes.", "warning");
+      return;
+    }
+    setIsUpdatingConsultTime(true);
+    try {
+      await queueManager.sendAction("consultationTimeUpdated", { minutes: val });
+    } catch (err) {
+      const error = err as Error;
+      addToast(error.message || "Failed to update consultation time.", "error");
+    } finally {
+      setIsUpdatingConsultTime(false);
+    }
+  };
+
+  // Reset Queue
+  const handleResetQueue = async () => {
+    if (!queueManager || isResettingQueue) return;
+    if (confirm("Are you sure you want to reset the queue state and clear all patient records?")) {
+      setIsResettingQueue(true);
+      try {
+        await queueManager.sendAction("queueReset");
+      } catch (err) {
+        const error = err as Error;
+        addToast(error.message || "Failed to reset database.", "error");
+      } finally {
+        setIsResettingQueue(false);
+      }
+    }
+  };
+
+  const handleReviewEmergency = async (requestId: string, tokenNumber: string, status: "approved" | "rejected") => {
+    if (!queueManager || reviewingRequestIds[requestId]) return;
+    setReviewingRequestIds(prev => ({ ...prev, [requestId]: true }));
+    try {
+      await queueManager.sendAction("emergencyRequestReviewed", {
+        requestId,
+        tokenNumber,
+        status
+      });
+    } catch (err) {
+      const error = err as Error;
+      addToast(error.message || "Failed to review emergency request.", "error");
+    } finally {
+      setReviewingRequestIds(prev => {
+        const next = { ...prev };
+        delete next[requestId];
+        return next;
+      });
+    }
   };
 
   // Derived state from authoritative QueueState only
@@ -443,11 +511,21 @@ export default function ReceptionistPage() {
             <ThemeToggle />
             <button
               onClick={handleResetQueue}
-              className="px-3.5 py-2.5 rounded-xl border border-rose-500/20 bg-rose-500/5 hover:bg-rose-500/10 dark:hover:bg-rose-500/20 text-rose-600 dark:text-rose-455 text-xs font-bold flex items-center gap-1.5 transition-all focus:ring-2 focus:ring-rose-500/20 outline-none cursor-pointer"
+              disabled={isResettingQueue}
+              className="px-3.5 py-2.5 rounded-xl border border-rose-500/20 bg-rose-500/5 hover:bg-rose-500/10 dark:hover:bg-rose-500/20 text-rose-600 dark:text-rose-455 text-xs font-bold flex items-center gap-1.5 transition-all focus:ring-2 focus:ring-rose-500/20 outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               title="Reset queue database"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
-              Reset Database
+              {isResettingQueue ? (
+                <>
+                  <div className="w-3.5 h-3.5 rounded-full border-2 border-rose-550/30 border-t-rose-600 animate-spin"></div>
+                  Resetting...
+                </>
+              ) : (
+                <>
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Reset Database
+                </>
+              )}
             </button>
             <button
               onClick={handleLogout}
@@ -507,7 +585,8 @@ export default function ReceptionistPage() {
                   value={patientName}
                   onChange={(e) => setPatientName(e.target.value)}
                   placeholder="Enter name (e.g. John Doe)"
-                  className="w-full px-4 py-3 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)]/40 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:border-[var(--clinic-primary)] dark:focus:border-[var(--clinic-primary)] focus:ring-2 focus:ring-[var(--clinic-primary)]/10 outline-none transition-all font-medium text-sm"
+                  disabled={isAddingPatient}
+                  className="w-full px-4 py-3 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)]/40 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:border-[var(--clinic-primary)] dark:focus:border-[var(--clinic-primary)] focus:ring-2 focus:ring-[var(--clinic-primary)]/10 outline-none transition-all font-medium text-sm disabled:opacity-75 disabled:cursor-not-allowed"
                   required
                   autoComplete="off"
                 />
@@ -515,11 +594,20 @@ export default function ReceptionistPage() {
               
               <button
                 type="submit"
-                disabled={!patientName.trim()}
+                disabled={!patientName.trim() || isAddingPatient}
                 className="w-full py-3.5 px-4 rounded-2xl bg-[var(--clinic-primary)] hover:bg-[var(--clinic-primary-hover)] disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 dark:disabled:text-slate-600 text-white font-extrabold text-sm shadow-lg shadow-teal-500/10 hover:shadow-teal-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed border-none font-bold"
               >
-                <Plus className="w-4.5 h-4.5" />
-                Add to Queue
+                {isAddingPatient ? (
+                  <>
+                    <div className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin"></div>
+                    Registering...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4.5 h-4.5" />
+                    Add to Queue
+                  </>
+                )}
               </button>
             </form>
             <p className="text-[10px] text-slate-400 mt-3 text-center">
@@ -538,11 +626,20 @@ export default function ReceptionistPage() {
             
             <button
               onClick={handleCallNext}
-              disabled={waitingPatients.length === 0}
-              className="w-full py-4 px-4 rounded-2xl bg-gradient-to-r from-sky-600 to-teal-650 hover:from-sky-700 hover:to-teal-700 disabled:from-slate-200 dark:disabled:from-slate-800 disabled:to-slate-200 dark:disabled:to-slate-800 disabled:text-slate-400 dark:disabled:text-slate-655 text-white font-extrabold text-base shadow-xl shadow-sky-500/10 hover:shadow-sky-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed border-none"
+              disabled={waitingPatients.length === 0 || isCallingNext}
+              className="w-full py-4 px-4 rounded-2xl bg-gradient-to-r from-sky-600 to-teal-650 hover:from-sky-700 hover:to-teal-700 disabled:from-slate-200 dark:disabled:from-slate-800 disabled:to-slate-200 dark:disabled:to-slate-800 disabled:text-slate-405 text-white font-extrabold text-base shadow-xl shadow-sky-500/10 hover:shadow-sky-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed border-none"
             >
-              Call Next Patient
-              <ChevronRight className="w-5 h-5" />
+              {isCallingNext ? (
+                <>
+                  <div className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin"></div>
+                  Calling Next Patient...
+                </>
+              ) : (
+                <>
+                  Call Next Patient
+                  <ChevronRight className="w-5 h-5" />
+                </>
+              )}
             </button>
 
             {waitingPatients.length === 0 && (
@@ -569,19 +666,21 @@ export default function ReceptionistPage() {
                 <button
                   type="button"
                   onClick={() => handleUpdateConsultationTime(avgConsultation - 1)}
-                  disabled={avgConsultation <= 1}
+                  disabled={avgConsultation <= 1 || isUpdatingConsultTime}
                   className="w-10 h-10 rounded-xl bg-[var(--card-bg)]/80 hover:bg-[var(--card-bg)] border border-[var(--card-border)] text-slate-800 dark:text-slate-200 flex items-center justify-center font-extrabold transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                 >
                   -
                 </button>
                 
-                <div className="flex-1 flex items-center justify-center border border-[var(--card-border)] rounded-xl bg-[var(--card-bg)]/40 h-10 px-3">
+                <div className="flex-1 flex items-center justify-center border border-[var(--card-border)] rounded-xl bg-[var(--card-bg)]/40 h-10 px-3 opacity-90">
                   <input
                     type="number"
                     min="1"
+                    max="60"
+                    disabled={isUpdatingConsultTime}
                     value={avgConsultation}
                     onChange={(e) => handleUpdateConsultationTime(parseInt(e.target.value, 10) || 1)}
-                    className="w-full text-center bg-transparent border-none outline-none font-extrabold text-sm text-slate-800 dark:text-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    className="w-full text-center bg-transparent border-none outline-none font-extrabold text-sm text-slate-800 dark:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                   <span className="text-xs text-slate-400 font-extrabold ml-1">min</span>
                 </div>
@@ -589,7 +688,8 @@ export default function ReceptionistPage() {
                 <button
                   type="button"
                   onClick={() => handleUpdateConsultationTime(avgConsultation + 1)}
-                  className="w-10 h-10 rounded-xl bg-[var(--card-bg)]/80 hover:bg-[var(--card-bg)] border border-[var(--card-border)] text-slate-800 dark:text-slate-200 flex items-center justify-center font-extrabold transition-colors cursor-pointer"
+                  disabled={isUpdatingConsultTime}
+                  className="w-10 h-10 rounded-xl bg-[var(--card-bg)]/80 hover:bg-[var(--card-bg)] border border-[var(--card-border)] text-slate-800 dark:text-slate-200 flex items-center justify-center font-extrabold transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                 >
                   +
                 </button>
@@ -681,15 +781,31 @@ export default function ReceptionistPage() {
                       <div className="flex items-center gap-2 mt-2 md:mt-0 shrink-0">
                         <button
                           onClick={() => handleReviewEmergency(req.id, req.tokenNumber, "approved")}
-                          className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-2xs font-extrabold transition-all shadow-sm active:scale-95 border-none cursor-pointer"
+                          disabled={!!reviewingRequestIds[req.id]}
+                          className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-2xs font-extrabold transition-all shadow-sm active:scale-95 border-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          ✅ Approve Priority
+                          {reviewingRequestIds[req.id] ? (
+                            <>
+                              <div className="w-3 h-3 rounded-full border-2 border-white/30 border-t-white animate-spin"></div>
+                              Approve...
+                            </>
+                          ) : (
+                            "✅ Approve Priority"
+                          )}
                         </button>
                         <button
                           onClick={() => handleReviewEmergency(req.id, req.tokenNumber, "rejected")}
-                          className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-2xs font-extrabold transition-all shadow-sm active:scale-95 border-none cursor-pointer"
+                          disabled={!!reviewingRequestIds[req.id]}
+                          className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-2xs font-extrabold transition-all shadow-sm active:scale-95 border-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          ❌ Reject Request
+                          {reviewingRequestIds[req.id] ? (
+                            <>
+                              <div className="w-3 h-3 rounded-full border-2 border-white/30 border-t-white animate-spin"></div>
+                              Reject...
+                            </>
+                          ) : (
+                            "❌ Reject Request"
+                          )}
                         </button>
                       </div>
                     )}
