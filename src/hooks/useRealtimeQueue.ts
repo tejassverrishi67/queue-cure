@@ -353,6 +353,7 @@ class SupabaseQueueManager {
     }
 
     if (event === "tokenAdvanced") {
+      try {
         let res;
         try {
           res = await supabase
@@ -486,29 +487,36 @@ class SupabaseQueueManager {
         const reviewedAt = new Date().toISOString();
 
         // 1. Update emergency request status
-        const { error: requestError } = await supabase
-          .from("emergency_requests")
-          .update({
-            status,
-            reviewed_at: reviewedAt
-          })
-          .eq("id", requestId);
+        try {
+          const { error: requestError } = await supabase
+            .from("emergency_requests")
+            .update({
+              status,
+              reviewed_at: reviewedAt
+            })
+            .eq("id", requestId);
 
-        if (requestError) {
-          console.error("[SupabaseQueue] Error updating emergency request:", requestError);
-          return;
+          if (requestError) {
+            console.warn("[SupabaseQueue] Warning: Error updating emergency request status:", requestError);
+          }
+        } catch (dbErr) {
+          console.warn("[SupabaseQueue] Exception updating emergency request:", dbErr);
         }
 
         // 2. If approved, mark patient as emergency in patients table
         if (status === "approved") {
-          const { error: patientError } = await supabase
-            .from("patients")
-            .update({ is_emergency: true })
-            .eq("token_number", tokenNumber)
-            .eq("status", "waiting"); // Only waiting patients can be set to emergency
+          try {
+            const { error: patientError } = await supabase
+              .from("patients")
+              .update({ is_emergency: true })
+              .eq("token_number", tokenNumber)
+              .eq("status", "waiting"); // Only waiting patients can be set to emergency
 
-          if (patientError) {
-            console.error("[SupabaseQueue] Error setting patient emergency status:", patientError);
+            if (patientError) {
+              console.warn("[SupabaseQueue] Warning: Error setting patient emergency status:", patientError);
+            }
+          } catch (dbErr) {
+            console.warn("[SupabaseQueue] Exception setting patient emergency status:", dbErr);
           }
         }
 
@@ -529,8 +537,14 @@ class SupabaseQueueManager {
 
     if (event === "queueReset") {
       try {
-        // Clear emergency requests and patients tables
-        await supabase.from("emergency_requests").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+        // Clear emergency requests table (isolated query)
+        try {
+          await supabase.from("emergency_requests").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+        } catch (emergencyErr) {
+          console.warn("[SupabaseQueue] Warning: Failed to clear emergency requests:", emergencyErr);
+        }
+
+        // Clear patients table
         await supabase.from("patients").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 
         await supabase

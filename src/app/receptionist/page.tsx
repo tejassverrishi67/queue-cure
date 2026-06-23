@@ -201,11 +201,15 @@ export default function ReceptionistPage() {
   };
 
   // Derived state from authoritative QueueState only
-  // Sort waiting patients: check-in order (FIFO)
+  // Sort waiting patients: emergency first (FIFO among themselves), then normal patients (FIFO among themselves)
   const waitingPatients = queueState?.waitingPatients
     ? [...queueState.waitingPatients]
         .filter(p => p.status === "waiting")
-        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        .sort((a, b) => {
+          if (a.isEmergency && !b.isEmergency) return -1;
+          if (!a.isEmergency && b.isEmergency) return 1;
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        })
     : [];
 
   const calledPatients = queueState?.waitingPatients.filter(p => p.status === "called") || [];
@@ -662,7 +666,7 @@ export default function ReceptionistPage() {
                             ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
                             : req.status === "approved"
                               ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
-                              : "bg-slate-500/10 text-slate-500 dark:text-slate-400 border border-slate-500/20"
+                              : "bg-slate-500/10 text-slate-550 dark:text-slate-400 border border-slate-500/20"
                         }`}>
                           {req.status === "pending" && "🟠 Pending"}
                           {req.status === "approved" && "🟢 Approved"}
@@ -673,6 +677,22 @@ export default function ReceptionistPage() {
                         {req.reason}
                       </p>
                     </div>
+                    {req.status === "pending" && (
+                      <div className="flex items-center gap-2 mt-2 md:mt-0 shrink-0">
+                        <button
+                          onClick={() => handleReviewEmergency(req.id, req.tokenNumber, "approved")}
+                          className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-2xs font-extrabold transition-all shadow-sm active:scale-95 border-none cursor-pointer"
+                        >
+                          ✅ Approve Priority
+                        </button>
+                        <button
+                          onClick={() => handleReviewEmergency(req.id, req.tokenNumber, "rejected")}
+                          className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-2xs font-extrabold transition-all shadow-sm active:scale-95 border-none cursor-pointer"
+                        >
+                          ❌ Reject Request
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -712,15 +732,29 @@ export default function ReceptionistPage() {
                     return (
                       <div 
                         key={patient.id} 
-                        className="py-3 first:pt-0 last:pb-0 flex items-center justify-between gap-3 animate-fade-in"
+                        className={`py-3 flex items-center justify-between gap-3 animate-fade-in transition-all ${
+                          patient.isEmergency 
+                            ? "border border-rose-500/30 rounded-2xl bg-rose-500/5 px-4 my-1.5 shadow-sm" 
+                            : "first:pt-0 last:pb-0 border-b border-dashed border-slate-100 dark:border-slate-800"
+                        }`}
                       >
                         <div className="flex items-center gap-3">
-                          <div className="h-10 w-14 bg-[var(--clinic-primary)]/10 text-[var(--clinic-primary)] rounded-xl flex items-center justify-center font-extrabold font-mono text-sm tracking-wide border border-[var(--clinic-primary)]/20">
+                          <div className={`h-10 w-14 rounded-xl flex items-center justify-center font-extrabold font-mono text-sm tracking-wide border relative ${
+                            patient.isEmergency 
+                              ? "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30" 
+                              : "bg-[var(--clinic-primary)]/10 text-[var(--clinic-primary)] border-[var(--clinic-primary)]/20"
+                          }`}>
                             {patient.tokenNumber}
+                            {patient.isEmergency && (
+                              <span className="absolute -top-1.5 -right-1.5 text-2xs" title="Emergency Approved">
+                                🚨
+                              </span>
+                            )}
                           </div>
                           <div>
-                            <p className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate max-w-[90px]">
+                            <p className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate max-w-[90px] flex items-center gap-1">
                               {patient.name}
+                              {patient.isEmergency && <span className="text-2xs" title="Emergency Approved">🚨</span>}
                             </p>
                             <span className="text-[10px] text-slate-400 flex items-center gap-0.5 mt-0.5 font-semibold">
                               <Clock className="w-3 h-3 text-slate-450" />
@@ -739,7 +773,7 @@ export default function ReceptionistPage() {
                               Waiting
                             </span>
                           )}
-                          <span className="text-[10px] text-slate-550 dark:text-slate-450 font-bold flex items-center gap-0.5">
+                          <span className="text-[10px] text-slate-550 dark:text-slate-455 font-bold flex items-center gap-0.5">
                             <Timer className="w-3 h-3 text-slate-400" />
                             {waitTime} min
                           </span>
@@ -777,15 +811,29 @@ export default function ReceptionistPage() {
                   sortedCalledPatients.map((patient) => (
                     <div 
                       key={patient.id} 
-                      className="py-3.5 first:pt-0 last:pb-0 flex items-center justify-between gap-3 text-xs animate-fade-in"
+                      className={`py-3.5 flex items-center justify-between gap-3 text-xs animate-fade-in transition-all ${
+                        patient.isEmergency 
+                          ? "border border-rose-500/30 rounded-2xl bg-rose-500/5 px-4 my-1.5 shadow-sm" 
+                          : "first:pt-0 last:pb-0 border-b border-dashed border-slate-100 dark:border-slate-800"
+                      }`}
                     >
                       <div className="flex items-center gap-3">
-                        <span className="font-bold font-mono text-xs text-slate-650 dark:text-slate-400 bg-[var(--card-bg)] px-2 py-0.5 rounded border border-[var(--card-border)]">
+                        <span className={`font-bold font-mono text-xs px-2 py-0.5 rounded border relative ${
+                          patient.isEmergency 
+                            ? "bg-rose-500/10 text-rose-600 dark:text-rose-455 border-rose-500/30" 
+                            : "bg-[var(--card-bg)] text-slate-650 dark:text-slate-400 border-[var(--card-border)]"
+                        }`}>
                           {patient.tokenNumber}
+                          {patient.isEmergency && (
+                            <span className="absolute -top-1.5 -right-1.5 text-2xs" title="Emergency Approved">
+                              🚨
+                            </span>
+                          )}
                         </span>
                         <div>
-                          <p className="font-extrabold text-slate-750 dark:text-slate-200 truncate max-w-[100px]">
+                          <p className="font-extrabold text-slate-750 dark:text-slate-200 truncate max-w-[100px] flex items-center gap-1">
                             {patient.name}
+                            {patient.isEmergency && <span className="text-2xs" title="Emergency Approved">🚨</span>}
                           </p>
                           <span className="text-[10px] text-slate-400 font-semibold block mt-0.5">
                             Checked in: {formatTime(patient.createdAt)}
@@ -796,7 +844,7 @@ export default function ReceptionistPage() {
                         <span className="px-2 py-0.5 rounded bg-[var(--clinic-primary)]/10 text-[var(--clinic-primary)] text-[9px] font-extrabold tracking-wider uppercase block mb-1">
                           Called
                         </span>
-                        <span className="text-[10px] text-slate-400 dark:text-slate-450 font-bold">
+                        <span className="text-[10px] text-slate-400 dark:text-slate-455 font-bold">
                           {patient.calledAt ? formatTime(patient.calledAt) : "—"}
                         </span>
                       </div>
