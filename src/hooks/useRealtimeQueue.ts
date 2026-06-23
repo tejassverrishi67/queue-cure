@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { RealtimeChannel } from "@supabase/supabase-js";
 
 export interface Patient {
   id: string;
@@ -19,48 +20,71 @@ export interface QueueState {
   lastTokenIndex: number;
 }
 
-type Listener = (...args: any[]) => void;
+export type EventPayloadMap = {
+  queueUpdated: QueueState;
+  patientAdded: { name: string; tokenNumber: string };
+  tokenAdvanced: { currentToken: string; patientName: string };
+  queueReset: undefined;
+  consultationTimeUpdated: { minutes: number };
+  connect: undefined;
+  disconnect: undefined;
+};
 
-class SupabaseSocketManager {
-  private listeners: { [event: string]: Set<Listener> } = {};
+export type ActionPayloadMap = {
+  queueUpdated: undefined;
+  patientAdded: { name: string };
+  tokenAdvanced: undefined;
+  queueReset: undefined;
+  consultationTimeUpdated: { minutes: number };
+};
+
+type Listener<K extends keyof EventPayloadMap> = (payload: EventPayloadMap[K]) => void;
+
+class SupabaseQueueManager {
+  private listeners: { [event: string]: Set<(...args: never[]) => void> } = {};
   private isInitialized = false;
-  private channel: any = null;
+  private channel: RealtimeChannel | null = null;
   private queueState: QueueState = {
     currentToken: null,
     averageConsultationTime: 5,
     waitingPatients: [],
     lastTokenIndex: 0
   };
+  private connected = false;
 
   constructor() {
     this.init();
   }
 
-  on(event: string, callback: Listener) {
+  isConnected() {
+    return this.connected;
+  }
+
+  on<K extends keyof EventPayloadMap>(event: K, callback: Listener<K>) {
     if (!this.listeners[event]) {
       this.listeners[event] = new Set();
     }
-    this.listeners[event].add(callback);
+    this.listeners[event].add(callback as (...args: never[]) => void);
 
     // If we've already loaded the queueState, notify new listeners instantly on subscription
     if (event === "queueUpdated" && this.isInitialized) {
-      callback(this.queueState);
+      (callback as Listener<"queueUpdated">)(this.queueState);
     }
   }
 
-  off(event: string, callback: Listener) {
+  off<K extends keyof EventPayloadMap>(event: K, callback: Listener<K>) {
     if (this.listeners[event]) {
-      this.listeners[event].delete(callback);
+      this.listeners[event].delete(callback as (...args: never[]) => void);
     }
   }
 
-  private dispatch(event: string, ...args: any[]) {
+  private dispatch<K extends keyof EventPayloadMap>(event: K, payload: EventPayloadMap[K]) {
     if (this.listeners[event]) {
       this.listeners[event].forEach(cb => {
         try {
-          cb(...args);
+          (cb as unknown as Listener<K>)(payload);
         } catch (e) {
-          console.error(`[SupabaseSocket] Error executing listener for event '${event}':`, e);
+          console.error(`[SupabaseQueue] Error executing listener for event '${event}':`, e);
         }
       });
     }
@@ -69,7 +93,7 @@ class SupabaseSocketManager {
   private async init() {
     if (typeof window === "undefined" || !supabase) {
       if (!supabase) {
-        console.warn("[SupabaseSocket] Supabase client is not available. Real-time updates and persistence are disabled.");
+        console.warn("[SupabaseQueue] Supabase client is not available. Real-time updates and database operations are disabled.");
       }
       return;
     }
@@ -87,16 +111,16 @@ class SupabaseSocketManager {
 
     // Wire up custom broadcast listener events
     this.channel
-      .on("broadcast", { event: "patientAdded" }, ({ payload }: any) => {
+      .on("broadcast", { event: "patientAdded" }, ({ payload }: { payload: { name: string; tokenNumber: string } }) => {
         this.dispatch("patientAdded", payload);
       })
-      .on("broadcast", { event: "tokenAdvanced" }, ({ payload }: any) => {
+      .on("broadcast", { event: "tokenAdvanced" }, ({ payload }: { payload: { currentToken: string; patientName: string } }) => {
         this.dispatch("tokenAdvanced", payload);
       })
       .on("broadcast", { event: "queueReset" }, () => {
-        this.dispatch("queueReset");
+        this.dispatch("queueReset", undefined);
       })
-      .on("broadcast", { event: "consultationTimeUpdated" }, ({ payload }: any) => {
+      .on("broadcast", { event: "consultationTimeUpdated" }, ({ payload }: { payload: { minutes: number } }) => {
         this.dispatch("consultationTimeUpdated", payload);
       });
 
@@ -105,21 +129,27 @@ class SupabaseSocketManager {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "patients" },
-        () => this.fetchAndPublishState()
+        () => {
+          this.fetchAndPublishState();
+        }
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "queue_settings" },
-        () => this.fetchAndPublishState()
+        () => {
+          this.fetchAndPublishState();
+        }
       );
 
     // Subscribe to the channel
     this.channel.subscribe((status: string) => {
-      console.log(`[SupabaseSocket] Realtime subscription status: ${status}`);
+      console.log(`[SupabaseQueue] Realtime subscription status: ${status}`);
       if (status === "SUBSCRIBED") {
-        this.dispatch("connect");
+        this.connected = true;
+        this.dispatch("connect", undefined);
       } else {
-        this.dispatch("disconnect");
+        this.connected = false;
+        this.dispatch("disconnect", undefined);
       }
     });
   }
@@ -129,11 +159,13 @@ class SupabaseSocketManager {
 
     try {
       // Retrieve settings, upserting default configuration if row id = 1 is missing
-      let { data: settings, error: settingsError } = await supabase
+      const { data: settings, error: settingsError } = await supabase
         .from("queue_settings")
         .select("*")
         .eq("id", 1)
         .single();
+
+      let currentSettings = settings;
 
       if (settingsError || !settings) {
         const { data: newSettings, error: initError } = await supabase
@@ -148,9 +180,9 @@ class SupabaseSocketManager {
           .single();
 
         if (initError) {
-          console.error("[SupabaseSocket] Error initializing default queue_settings:", initError);
+          console.error("[SupabaseQueue] Error initializing default queue_settings:", initError);
         } else {
-          settings = newSettings;
+          currentSettings = newSettings;
         }
       }
 
@@ -161,14 +193,14 @@ class SupabaseSocketManager {
         .order("created_at", { ascending: true });
 
       if (patientsError) {
-        console.error("[SupabaseSocket] Error fetching patients queue:", patientsError);
+        console.error("[SupabaseQueue] Error fetching patients queue:", patientsError);
         return;
       }
 
-      // Construct matching Socket.IO QueueState structure
+      // Construct QueueState structure
       this.queueState = {
-        currentToken: settings?.current_token || null,
-        averageConsultationTime: settings?.average_consultation_time ?? 5,
+        currentToken: currentSettings?.current_token || null,
+        averageConsultationTime: currentSettings?.average_consultation_time ?? 5,
         waitingPatients: (patients || []).map(p => ({
           id: p.id,
           name: p.name,
@@ -177,32 +209,32 @@ class SupabaseSocketManager {
           calledAt: p.called_at || undefined,
           status: p.status as "waiting" | "called"
         })),
-        lastTokenIndex: settings?.last_token_index ?? 0
+        lastTokenIndex: currentSettings?.last_token_index ?? 0
       };
 
       this.dispatch("queueUpdated", this.queueState);
     } catch (err) {
-      console.error("[SupabaseSocket] Failed to fetch and broadcast queue state:", err);
+      console.error("[SupabaseQueue] Failed to fetch and broadcast queue state:", err);
     }
   }
 
-  async emit(event: string, data?: any) {
+  async sendAction<K extends keyof ActionPayloadMap>(event: K, data?: ActionPayloadMap[K]) {
     if (!supabase) {
-      console.warn(`[SupabaseSocket] Supabase client is not available. Cannot emit event: ${event}`);
+      console.warn(`[SupabaseQueue] Supabase client is not available. Cannot send action: ${event}`);
       return;
     }
 
-    if (event === "requestQueue") {
+    if (event === "queueUpdated") {
       this.fetchAndPublishState();
       return;
     }
 
-    if (event === "addPatient") {
-      if (!data || !data.name) return;
-      const name = data.name.trim();
+    if (event === "patientAdded") {
+      const payload = data as { name: string };
+      if (!payload || !payload.name) return;
+      const name = payload.name.trim();
 
       try {
-        // 1. Get current settings state
         const { data: settings } = await supabase
           .from("queue_settings")
           .select("last_token_index")
@@ -212,13 +244,11 @@ class SupabaseSocketManager {
         const nextIndex = (settings?.last_token_index ?? 0) + 1;
         const newToken = `A${String(nextIndex).padStart(3, "0")}`;
 
-        // 2. Update settings table
         await supabase
           .from("queue_settings")
           .update({ last_token_index: nextIndex })
           .eq("id", 1);
 
-        // 3. Insert patient
         const { error: insertError } = await supabase
           .from("patients")
           .insert({
@@ -229,11 +259,10 @@ class SupabaseSocketManager {
           });
 
         if (insertError) {
-          console.error("[SupabaseSocket] Error registering patient:", insertError);
+          console.error("[SupabaseQueue] Error registering patient:", insertError);
           return;
         }
 
-        // 4. Broadcast notification event to other clients
         if (this.channel) {
           this.channel.send({
             type: "broadcast",
@@ -242,19 +271,15 @@ class SupabaseSocketManager {
           });
         }
 
-        // Trigger local toast alerts immediately
         this.dispatch("patientAdded", { name, tokenNumber: newToken });
-        
-        // Refetch DB state
         await this.fetchAndPublishState();
       } catch (err) {
-        console.error("[SupabaseSocket] Failed to process addPatient event:", err);
+        console.error("[SupabaseQueue] Failed to process patientAdded event:", err);
       }
     }
 
-    if (event === "callNext") {
+    if (event === "tokenAdvanced") {
       try {
-        // 1. Find the first waiting patient in check-in order
         const { data: nextPatient, error } = await supabase
           .from("patients")
           .select("*")
@@ -264,7 +289,7 @@ class SupabaseSocketManager {
           .maybeSingle();
 
         if (error) {
-          console.error("[SupabaseSocket] Error searching next waiting patient:", error);
+          console.error("[SupabaseQueue] Error searching next waiting patient:", error);
           return;
         }
 
@@ -272,19 +297,16 @@ class SupabaseSocketManager {
           const calledAt = new Date().toISOString();
           const currentToken = nextPatient.token_number;
 
-          // 2. Mark status as called
           await supabase
             .from("patients")
             .update({ status: "called", called_at: calledAt })
             .eq("id", nextPatient.id);
 
-          // 3. Set current token in global queue configuration
           await supabase
             .from("queue_settings")
             .update({ current_token: currentToken })
             .eq("id", 1);
 
-          // 4. Broadcast token caller event
           if (this.channel) {
             this.channel.send({
               type: "broadcast",
@@ -293,30 +315,26 @@ class SupabaseSocketManager {
             });
           }
 
-          // Trigger local event instantly
           this.dispatch("tokenAdvanced", { currentToken, patientName: nextPatient.name });
-
-          // Refetch DB state
           await this.fetchAndPublishState();
         }
       } catch (err) {
-        console.error("[SupabaseSocket] Failed to process callNext event:", err);
+        console.error("[SupabaseQueue] Failed to process tokenAdvanced event:", err);
       }
     }
 
-    if (event === "updateAverageConsultationTime") {
-      if (!data || typeof data.minutes === "undefined") return;
-      const mins = parseInt(data.minutes, 10);
+    if (event === "consultationTimeUpdated") {
+      const payload = data as { minutes: number };
+      if (!payload || typeof payload.minutes === "undefined") return;
+      const mins = parseInt(String(payload.minutes), 10);
       if (isNaN(mins) || mins < 1) return;
 
       try {
-        // 1. Update DB config
         await supabase
           .from("queue_settings")
           .update({ average_consultation_time: mins })
           .eq("id", 1);
 
-        // 2. Broadcast change
         if (this.channel) {
           this.channel.send({
             type: "broadcast",
@@ -325,22 +343,17 @@ class SupabaseSocketManager {
           });
         }
 
-        // Dispatch local event
         this.dispatch("consultationTimeUpdated", { minutes: mins });
-
-        // Refetch DB state
         await this.fetchAndPublishState();
       } catch (err) {
-        console.error("[SupabaseSocket] Failed to update average consultation time settings:", err);
+        console.error("[SupabaseQueue] Failed to update average consultation time settings:", err);
       }
     }
 
-    if (event === "resetQueue") {
+    if (event === "queueReset") {
       try {
-        // 1. Delete all patient rows
         await supabase.from("patients").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 
-        // 2. Reset queue config back to initial setup
         await supabase
           .from("queue_settings")
           .update({
@@ -349,7 +362,6 @@ class SupabaseSocketManager {
           })
           .eq("id", 1);
 
-        // 3. Broadcast queue cleared signal
         if (this.channel) {
           this.channel.send({
             type: "broadcast",
@@ -357,48 +369,44 @@ class SupabaseSocketManager {
           });
         }
 
-        // Dispatch local event
-        this.dispatch("queueReset");
-
-        // Refetch DB state
+        this.dispatch("queueReset", undefined);
         await this.fetchAndPublishState();
       } catch (err) {
-        console.error("[SupabaseSocket] Failed to process resetQueue event:", err);
+        console.error("[SupabaseQueue] Failed to process queueReset event:", err);
       }
     }
   }
 }
 
-// Module-level singleton instance of our custom socket manager
-let globalSocketManager: SupabaseSocketManager | null = null;
+// Singleton queue manager instance
+let globalQueueManager: SupabaseQueueManager | null = null;
 
-if (typeof window !== "undefined" && !globalSocketManager) {
-  globalSocketManager = new SupabaseSocketManager();
+if (typeof window !== "undefined" && !globalQueueManager) {
+  globalQueueManager = new SupabaseQueueManager();
 }
 
-export function useSocket() {
-  const [socket] = useState<any>(globalSocketManager);
-  const [isConnected, setIsConnected] = useState(false);
+export function useRealtimeQueue() {
+  const [queueManager] = useState<SupabaseQueueManager | null>(globalQueueManager);
+  const [isConnected, setIsConnected] = useState(
+    globalQueueManager ? globalQueueManager.isConnected() : false
+  );
 
   useEffect(() => {
-    if (!globalSocketManager) return;
+    if (!globalQueueManager) return;
 
     const handleConnect = () => setIsConnected(true);
     const handleDisconnect = () => setIsConnected(false);
 
-    globalSocketManager.on("connect", handleConnect);
-    globalSocketManager.on("disconnect", handleDisconnect);
-
-    // Default to true if module is loaded on client side
-    setIsConnected(true);
+    globalQueueManager.on("connect", handleConnect);
+    globalQueueManager.on("disconnect", handleDisconnect);
 
     return () => {
-      if (globalSocketManager) {
-        globalSocketManager.off("connect", handleConnect);
-        globalSocketManager.off("disconnect", handleDisconnect);
+      if (globalQueueManager) {
+        globalQueueManager.off("connect", handleConnect);
+        globalQueueManager.off("disconnect", handleDisconnect);
       }
     };
   }, []);
 
-  return { socket, isConnected };
+  return { queueManager, isConnected };
 }

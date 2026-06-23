@@ -3,9 +3,9 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { 
-  useSocket, 
+  useRealtimeQueue, 
   QueueState 
-} from "@/hooks/useSocket";
+} from "@/hooks/useRealtimeQueue";
 import ThemeToggle from "@/components/ThemeToggle";
 import { useToast } from "@/components/Toast";
 import { 
@@ -20,19 +20,31 @@ import {
   Timer,
   BarChart3,
   UserCheck,
-  CheckCircle
+  CheckCircle,
+  Lock,
+  LogOut,
+  Eye,
+  EyeOff,
+  User
 } from "lucide-react";
 
 export default function ReceptionistPage() {
-  const { socket } = useSocket();
+  const { queueManager } = useRealtimeQueue();
   const { addToast } = useToast();
   const [queueState, setQueueState] = useState<QueueState | null>(null);
   const [patientName, setPatientName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Sync state on socket updates with complete lifecycle cleanup
+  // Authentication State
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  // Sync state on updates with complete lifecycle cleanup
   useEffect(() => {
-    if (!socket) return;
+    if (!queueManager) return;
 
     const handleQueueUpdated = (state: QueueState) => {
       console.log("[Receptionist] Queue state updated:", state);
@@ -61,47 +73,82 @@ export default function ReceptionistPage() {
     };
 
     // Subscriptions
-    socket.on("queueUpdated", handleQueueUpdated);
-    socket.on("patientAdded", handlePatientAdded);
-    socket.on("tokenAdvanced", handleTokenAdvanced);
-    socket.on("queueReset", handleQueueReset);
-    socket.on("consultationTimeUpdated", handleConsultationTimeUpdated);
+    queueManager.on("queueUpdated", handleQueueUpdated);
+    queueManager.on("patientAdded", handlePatientAdded);
+    queueManager.on("tokenAdvanced", handleTokenAdvanced);
+    queueManager.on("queueReset", handleQueueReset);
+    queueManager.on("consultationTimeUpdated", handleConsultationTimeUpdated);
 
     // Initial state request handshake
-    socket.emit("requestQueue");
+    queueManager.sendAction("queueUpdated");
 
     // Cleanup listeners
     return () => {
-      socket.off("queueUpdated", handleQueueUpdated);
-      socket.off("patientAdded", handlePatientAdded);
-      socket.off("tokenAdvanced", handleTokenAdvanced);
-      socket.off("queueReset", handleQueueReset);
-      socket.off("consultationTimeUpdated", handleConsultationTimeUpdated);
+      queueManager.off("queueUpdated", handleQueueUpdated);
+      queueManager.off("patientAdded", handlePatientAdded);
+      queueManager.off("tokenAdvanced", handleTokenAdvanced);
+      queueManager.off("queueReset", handleQueueReset);
+      queueManager.off("consultationTimeUpdated", handleConsultationTimeUpdated);
     };
-  }, [socket, addToast]);
+  }, [queueManager, addToast]);
 
-  // Autofocus input on initial page load
+  // Check auth session storage on mount to avoid server-side render mismatch
   useEffect(() => {
-    inputRef.current?.focus();
+    const adminSession = sessionStorage.getItem("isAdmin");
+    setIsLoggedIn(adminSession === "true");
   }, []);
+
+  // Autofocus input on initial page load once logged in
+  useEffect(() => {
+    if (isLoggedIn) {
+      inputRef.current?.focus();
+    }
+  }, [isLoggedIn]);
 
   // Keyboard shortcut: Pressing Escape focuses the register input
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && isLoggedIn) {
         inputRef.current?.focus();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [isLoggedIn]);
+
+  // Handlers for authentication
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoggingIn(true);
+    
+    // Simulate slight lag for a premium feel
+    setTimeout(() => {
+      if (username.trim() === "admin" && password === "admin") {
+        sessionStorage.setItem("isAdmin", "true");
+        setIsLoggedIn(true);
+        addToast("Logged in successfully", "success");
+      } else {
+        addToast("Invalid username or password", "error");
+      }
+      setIsLoggingIn(false);
+    }, 450);
+  };
+
+  // Handlers for logout
+  const handleLogout = () => {
+    sessionStorage.removeItem("isAdmin");
+    setIsLoggedIn(false);
+    setUsername("");
+    setPassword("");
+    addToast("Logged out successfully", "info");
+  };
 
   // Form submission: Add patient
   const handleAddPatient = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!patientName.trim() || !socket) return;
+    if (!patientName.trim() || !queueManager) return;
 
-    socket.emit("addPatient", { name: patientName });
+    queueManager.sendAction("patientAdded", { name: patientName });
     
     // Clear and refocus input instantly
     setPatientName("");
@@ -112,21 +159,21 @@ export default function ReceptionistPage() {
 
   // Call Next Patient
   const handleCallNext = () => {
-    if (!socket) return;
-    socket.emit("callNext");
+    if (!queueManager) return;
+    queueManager.sendAction("tokenAdvanced");
   };
 
   // Update Consultation Time
   const handleUpdateConsultationTime = (val: number) => {
-    if (!socket || val < 1) return;
-    socket.emit("updateAverageConsultationTime", { minutes: val });
+    if (!queueManager || val < 1) return;
+    queueManager.sendAction("consultationTimeUpdated", { minutes: val });
   };
 
   // Reset Queue
   const handleResetQueue = () => {
-    if (!socket) return;
+    if (!queueManager) return;
     if (confirm("Are you sure you want to reset the queue state and clear all patient records?")) {
-      socket.emit("resetQueue");
+      queueManager.sendAction("queueReset");
     }
   };
 
@@ -155,6 +202,162 @@ export default function ReceptionistPage() {
       return "—";
     }
   };
+
+  // Render loading screen while resolving auth status to avoid hydration flash
+  if (isLoggedIn === null) {
+    return (
+      <div className="flex-1 flex flex-col justify-center items-center min-h-screen bg-slate-50 dark:bg-[#0b1329]">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 rounded-full border-4 border-teal-500/30 border-t-teal-650 dark:border-teal-400/30 dark:border-t-teal-400 animate-spin"></div>
+          <p className="text-xs font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-widest animate-pulse">
+            Verifying Portal Access...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Render Login screen if not logged in
+  if (isLoggedIn === false) {
+    return (
+      <div className="flex-1 flex flex-col justify-center items-center px-4 py-12 relative overflow-hidden bg-radial from-teal-500/5 via-transparent to-transparent min-h-screen">
+        {/* Background patterns */}
+        <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-teal-500/5 blur-3xl -z-10 animate-pulse" style={{ animationDuration: '8s' }}></div>
+        <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] rounded-full bg-sky-500/5 blur-3xl -z-10 animate-pulse" style={{ animationDuration: '10s' }}></div>
+
+        {/* Top bar with Back Button and Theme Toggle */}
+        <div className="absolute top-5 left-5 right-5 flex justify-between items-center z-40">
+          <Link 
+            href="/" 
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-855 dark:text-slate-400 dark:hover:text-slate-200 backdrop-blur-md transition-all duration-200 text-xs font-bold shadow-sm hover:shadow-md cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to Home
+          </Link>
+          <ThemeToggle />
+        </div>
+
+        <div className="max-w-md w-full text-center space-y-6 animate-slide-up mt-8">
+          {/* Badge & Welcome Header */}
+          <div className="space-y-4">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-extrabold bg-teal-500/10 border border-teal-500/20 text-teal-600 dark:text-teal-400">
+              <span>🔒 Staff Only Portal</span>
+            </div>
+            
+            <h1 className="text-3xl font-extrabold tracking-tight text-slate-850 dark:text-slate-100">
+              Receptionist Login
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto leading-relaxed font-semibold">
+              Receptionists use this dashboard to register patients and manage the live queue.
+            </p>
+          </div>
+
+          {/* Login Card */}
+          <div className="glass-card p-8 text-left space-y-6">
+            <div className="flex items-center gap-3.5 pb-4 border-b border-[var(--card-border)]">
+              <div className="p-2.5 rounded-xl bg-teal-500/10 text-teal-650 dark:text-teal-400">
+                <Lock className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-slate-800 dark:text-slate-100 text-sm">
+                  Sign In
+                </h3>
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 font-extrabold uppercase tracking-wider">
+                  Clinical Session Access
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="block text-2xs font-extrabold text-slate-500 dark:text-slate-450 uppercase tracking-wider mb-2">
+                  Username
+                </label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 dark:text-slate-500">
+                    <User className="w-4 h-4" />
+                  </span>
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="Enter admin username"
+                    className="w-full pl-10 pr-4 py-3 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)]/40 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:border-[var(--clinic-primary)] dark:focus:border-[var(--clinic-primary)] focus:ring-2 focus:ring-[var(--clinic-primary)]/10 outline-none transition-all font-semibold text-sm"
+                    required
+                    autoComplete="username"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-2xs font-extrabold text-slate-500 dark:text-slate-455 uppercase tracking-wider mb-2">
+                  Password
+                </label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 dark:text-slate-500">
+                    <Lock className="w-4 h-4" />
+                  </span>
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter password"
+                    className="w-full pl-10 pr-12 py-3 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)]/40 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:border-[var(--clinic-primary)] dark:focus:border-[var(--clinic-primary)] focus:ring-2 focus:ring-[var(--clinic-primary)]/10 outline-none transition-all font-semibold text-sm"
+                    required
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 dark:text-slate-500 hover:text-slate-655 dark:hover:text-slate-350 cursor-pointer transition-colors outline-none border-none bg-transparent"
+                    title={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoggingIn || !username.trim() || !password}
+                className="w-full mt-2 py-3.5 px-4 rounded-2xl bg-[var(--clinic-primary)] hover:bg-[var(--clinic-primary-hover)] disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 dark:disabled:text-slate-600 text-white font-extrabold text-sm shadow-lg shadow-teal-500/10 hover:shadow-teal-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed border-none font-bold"
+              >
+                {isLoggingIn ? (
+                  <>
+                    <div className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin"></div>
+                    Authenticating...
+                  </>
+                ) : (
+                  <>
+                    <span>Access Dashboard</span>
+                    <ChevronRight className="w-4.5 h-4.5" />
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+
+          {/* Credentials Helper Card */}
+          <div className="glass-card p-5 bg-teal-500/5 dark:bg-teal-500/5 border border-teal-500/10 text-center space-y-2">
+            <h4 className="text-2xs font-extrabold text-teal-600 dark:text-teal-400 uppercase tracking-widest">
+              🔑 Demo Credentials
+            </h4>
+            <div className="flex justify-center gap-6 text-xs text-slate-600 dark:text-slate-350 font-semibold">
+              <div>
+                <span className="text-slate-400 dark:text-slate-500 font-medium">Username:</span>{" "}
+                <code className="bg-slate-100 dark:bg-slate-900 px-1.5 py-0.5 rounded font-bold font-mono">admin</code>
+              </div>
+              <div>
+                <span className="text-slate-400 dark:text-slate-500 font-medium">Password:</span>{" "}
+                <code className="bg-slate-100 dark:bg-slate-900 px-1.5 py-0.5 rounded font-bold font-mono">admin</code>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex flex-col min-h-screen">
@@ -190,6 +393,14 @@ export default function ReceptionistPage() {
             >
               <RotateCcw className="w-3.5 h-3.5" />
               Reset Database
+            </button>
+            <button
+              onClick={handleLogout}
+              className="px-3.5 py-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white text-xs font-bold flex items-center gap-1.5 transition-all focus:ring-2 focus:ring-slate-500/20 outline-none cursor-pointer shadow-sm hover:shadow-md"
+              title="Logout of portal session"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              Logout
             </button>
           </div>
         </div>

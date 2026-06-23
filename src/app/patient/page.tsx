@@ -3,9 +3,9 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { 
-  useSocket, 
+  useRealtimeQueue, 
   QueueState 
-} from "@/hooks/useSocket";
+} from "@/hooks/useRealtimeQueue";
 import ThemeToggle from "@/components/ThemeToggle";
 import { useToast } from "@/components/Toast";
 import { 
@@ -20,22 +20,22 @@ import {
 } from "lucide-react";
 
 export default function PatientPage() {
-  const { socket } = useSocket();
+  const { queueManager } = useRealtimeQueue();
   const { addToast } = useToast();
   const [queueState, setQueueState] = useState<QueueState | null>(null);
   const [myTokenInput, setMyTokenInput] = useState("");
   const [myToken, setMyToken] = useState<string | null>(null);
 
-  // Reference to keep track of the current token in socket listeners
+  // Reference to keep track of the current token in listeners
   const myTokenRef = useRef(myToken);
 
   useEffect(() => {
     myTokenRef.current = myToken;
   }, [myToken]);
 
-  // Sync state on socket updates
+  // Sync state on updates
   useEffect(() => {
-    if (!socket) return;
+    if (!queueManager) return;
 
     const handleQueueUpdated = (state: QueueState) => {
       console.log("[Patient] Queue state updated:", state);
@@ -61,22 +61,22 @@ export default function PatientPage() {
     };
 
     // Subscriptions
-    socket.on("queueUpdated", handleQueueUpdated);
-    socket.on("tokenAdvanced", handleTokenAdvanced);
-    socket.on("queueReset", handleQueueReset);
-    socket.on("consultationTimeUpdated", handleConsultationTimeUpdated);
+    queueManager.on("queueUpdated", handleQueueUpdated);
+    queueManager.on("tokenAdvanced", handleTokenAdvanced);
+    queueManager.on("queueReset", handleQueueReset);
+    queueManager.on("consultationTimeUpdated", handleConsultationTimeUpdated);
 
     // Initial state request handshake
-    socket.emit("requestQueue");
+    queueManager.sendAction("queueUpdated");
 
     // Cleanup listeners on unmount
     return () => {
-      socket.off("queueUpdated", handleQueueUpdated);
-      socket.off("tokenAdvanced", handleTokenAdvanced);
-      socket.off("queueReset", handleQueueReset);
-      socket.off("consultationTimeUpdated", handleConsultationTimeUpdated);
+      queueManager.off("queueUpdated", handleQueueUpdated);
+      queueManager.off("tokenAdvanced", handleTokenAdvanced);
+      queueManager.off("queueReset", handleQueueReset);
+      queueManager.off("consultationTimeUpdated", handleConsultationTimeUpdated);
     };
-  }, [socket, addToast]);
+  }, [queueManager, addToast]);
 
   // Load state from localStorage on mount
   useEffect(() => {
