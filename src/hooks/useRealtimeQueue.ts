@@ -331,7 +331,6 @@ class SupabaseQueueManager {
           .from("patients")
           .select("*")
           .eq("status", "waiting")
-          .order("is_emergency", { ascending: false })
           .order("created_at", { ascending: true })
           .limit(1)
           .maybeSingle();

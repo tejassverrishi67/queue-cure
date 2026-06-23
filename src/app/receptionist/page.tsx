@@ -201,15 +201,11 @@ export default function ReceptionistPage() {
   };
 
   // Derived state from authoritative QueueState only
-  // Sort waiting patients: emergency first, then by check-in order (FIFO)
+  // Sort waiting patients: check-in order (FIFO)
   const waitingPatients = queueState?.waitingPatients
     ? [...queueState.waitingPatients]
         .filter(p => p.status === "waiting")
-        .sort((a, b) => {
-          if (a.isEmergency && !b.isEmergency) return -1;
-          if (!a.isEmergency && b.isEmergency) return 1;
-          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-        })
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
     : [];
 
   const calledPatients = queueState?.waitingPatients.filter(p => p.status === "called") || [];
@@ -677,23 +673,6 @@ export default function ReceptionistPage() {
                         {req.reason}
                       </p>
                     </div>
-
-                    {req.status === "pending" && (
-                      <div className="flex gap-2 shrink-0 self-end md:self-center">
-                        <button
-                          onClick={() => handleReviewEmergency(req.id, req.tokenNumber, "approved")}
-                          className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] flex items-center gap-1 transition-colors cursor-pointer border-none shadow-md shadow-emerald-500/10 hover:shadow-emerald-500/20"
-                        >
-                          ✅ Approve Priority
-                        </button>
-                        <button
-                          onClick={() => handleReviewEmergency(req.id, req.tokenNumber, "rejected")}
-                          className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-[11px] flex items-center gap-1 transition-colors cursor-pointer border-none shadow-md shadow-rose-500/10 hover:shadow-rose-500/20"
-                        >
-                          ❌ Reject Request
-                        </button>
-                      </div>
-                    )}
                   </div>
                 ))}
               </div>
@@ -736,17 +715,12 @@ export default function ReceptionistPage() {
                         className="py-3 first:pt-0 last:pb-0 flex items-center justify-between gap-3 animate-fade-in"
                       >
                         <div className="flex items-center gap-3">
-                          <div className={`h-10 w-14 rounded-xl flex items-center justify-center font-extrabold font-mono text-sm tracking-wide border ${
-                            patient.isEmergency 
-                              ? "bg-rose-500/10 text-rose-600 dark:text-rose-455 border-rose-500/30 animate-pulse" 
-                              : "bg-[var(--clinic-primary)]/10 text-[var(--clinic-primary)] border-[var(--clinic-primary)]/20"
-                          }`}>
+                          <div className="h-10 w-14 bg-[var(--clinic-primary)]/10 text-[var(--clinic-primary)] rounded-xl flex items-center justify-center font-extrabold font-mono text-sm tracking-wide border border-[var(--clinic-primary)]/20">
                             {patient.tokenNumber}
                           </div>
                           <div>
-                            <p className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate max-w-[90px] flex items-center gap-1">
+                            <p className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate max-w-[90px]">
                               {patient.name}
-                              {patient.isEmergency && <span className="text-rose-600 animate-pulse" title="Emergency Priority">🚨</span>}
                             </p>
                             <span className="text-[10px] text-slate-400 flex items-center gap-0.5 mt-0.5 font-semibold">
                               <Clock className="w-3 h-3 text-slate-450" />
@@ -759,10 +733,6 @@ export default function ReceptionistPage() {
                           {index === 0 ? (
                             <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[9px] font-extrabold tracking-wider uppercase animate-pulse">
                               Next Up
-                            </span>
-                          ) : patient.isEmergency ? (
-                            <span className="px-2 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[9px] font-extrabold tracking-wider uppercase animate-pulse">
-                              Emergency
                             </span>
                           ) : (
                             <span className="px-2 py-0.5 rounded bg-[var(--card-bg)] border border-[var(--card-border)] text-slate-500 dark:text-slate-400 text-[9px] font-bold">
@@ -810,12 +780,8 @@ export default function ReceptionistPage() {
                       className="py-3.5 first:pt-0 last:pb-0 flex items-center justify-between gap-3 text-xs animate-fade-in"
                     >
                       <div className="flex items-center gap-3">
-                        <span className={`font-bold font-mono text-xs px-2 py-0.5 rounded border ${
-                          patient.isEmergency
-                            ? "bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400 animate-pulse"
-                            : "bg-[var(--card-bg)] border-[var(--card-border)] text-slate-650 dark:text-slate-400"
-                        }`}>
-                          {patient.tokenNumber} {patient.isEmergency && "🚨"}
+                        <span className="font-bold font-mono text-xs text-slate-650 dark:text-slate-400 bg-[var(--card-bg)] px-2 py-0.5 rounded border border-[var(--card-border)]">
+                          {patient.tokenNumber}
                         </span>
                         <div>
                           <p className="font-extrabold text-slate-750 dark:text-slate-200 truncate max-w-[100px]">
