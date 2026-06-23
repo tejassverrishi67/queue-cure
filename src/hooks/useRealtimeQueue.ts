@@ -59,6 +59,7 @@ class SupabaseQueueManager {
   private listeners: { [event: string]: Set<(...args: never[]) => void> } = {};
   private isInitialized = false;
   private channel: RealtimeChannel | null = null;
+  private emergencyChannel: RealtimeChannel | null = null;
   private queueState: QueueState = {
     currentToken: null,
     averageConsultationTime: 5,
@@ -137,12 +138,6 @@ class SupabaseQueueManager {
       })
       .on("broadcast", { event: "consultationTimeUpdated" }, ({ payload }: { payload: { minutes: number } }) => {
         this.dispatch("consultationTimeUpdated", payload);
-      })
-      .on("broadcast", { event: "emergencyRequestSubmitted" }, ({ payload }: { payload: { tokenNumber: string; reason: string } }) => {
-        this.dispatch("emergencyRequestSubmitted", payload);
-      })
-      .on("broadcast", { event: "emergencyRequestReviewed" }, ({ payload }: { payload: { tokenNumber: string; status: "approved" | "rejected" } }) => {
-        this.dispatch("emergencyRequestReviewed", payload);
       });
 
     // Wire up database change listeners to automatically refetch state on updates
@@ -160,13 +155,6 @@ class SupabaseQueueManager {
         () => {
           this.fetchAndPublishState();
         }
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "emergency_requests" },
-        () => {
-          this.fetchAndPublishState();
-        }
       );
 
     // Subscribe to the channel
@@ -180,6 +168,38 @@ class SupabaseQueueManager {
         this.dispatch("disconnect", undefined);
       }
     });
+
+    // 3. Setup the Emergency subscription channel separately for safety
+    try {
+      this.emergencyChannel = supabase.channel("emergency_events", {
+        config: {
+          broadcast: { self: false }
+        }
+      });
+
+      this.emergencyChannel
+        .on("broadcast", { event: "emergencyRequestSubmitted" }, ({ payload }: { payload: { tokenNumber: string; reason: string } }) => {
+          this.dispatch("emergencyRequestSubmitted", payload);
+        })
+        .on("broadcast", { event: "emergencyRequestReviewed" }, ({ payload }: { payload: { tokenNumber: string; status: "approved" | "rejected" } }) => {
+          this.dispatch("emergencyRequestReviewed", payload);
+        });
+
+      this.emergencyChannel
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "emergency_requests" },
+          () => {
+            this.fetchAndPublishState();
+          }
+        );
+
+      this.emergencyChannel.subscribe((status: string) => {
+        console.log(`[SupabaseQueue] Emergency subscription status: ${status}`);
+      });
+    } catch (err) {
+      console.warn("[SupabaseQueue] Failed to setup emergency realtime channel:", err);
+    }
   }
 
   async fetchAndPublishState() {
@@ -226,13 +246,20 @@ class SupabaseQueueManager {
       }
 
       // Fetch all emergency requests from the DB sorted by creation order
-      const { data: emergencyRequests, error: emergencyError } = await supabase
-        .from("emergency_requests")
-        .select("*")
-        .order("created_at", { ascending: true });
+      let emergencyRequests = [];
+      try {
+        const { data: reqs, error: emergencyError } = await supabase
+          .from("emergency_requests")
+          .select("*")
+          .order("created_at", { ascending: true });
 
-      if (emergencyError) {
-        console.error("[SupabaseQueue] Error fetching emergency requests:", emergencyError);
+        if (emergencyError) {
+          console.warn("[SupabaseQueue] Error fetching emergency requests:", emergencyError);
+        } else {
+          emergencyRequests = reqs || [];
+        }
+      } catch (err) {
+        console.warn("[SupabaseQueue] Exception fetching emergency requests:", err);
       }
 
       // Construct QueueState structure
@@ -326,19 +353,37 @@ class SupabaseQueueManager {
     }
 
     if (event === "tokenAdvanced") {
-      try {
-        const { data: nextPatient, error } = await supabase
-          .from("patients")
-          .select("*")
-          .eq("status", "waiting")
-          .order("created_at", { ascending: true })
-          .limit(1)
-          .maybeSingle();
+        let res;
+        try {
+          res = await supabase
+            .from("patients")
+            .select("*")
+            .eq("status", "waiting")
+            .order("is_emergency", { ascending: false })
+            .order("created_at", { ascending: true })
+            .limit(1)
+            .maybeSingle();
 
-        if (error) {
-          console.error("[SupabaseQueue] Error searching next waiting patient:", error);
+          if (res.error) {
+            throw res.error;
+          }
+        } catch (dbErr) {
+          console.warn("[SupabaseQueue] Emergency order query failed, falling back to FIFO:", dbErr);
+          res = await supabase
+            .from("patients")
+            .select("*")
+            .eq("status", "waiting")
+            .order("created_at", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+        }
+
+        if (res.error) {
+          console.error("[SupabaseQueue] Error searching next waiting patient:", res.error);
           return;
         }
+
+        const nextPatient = res.data;
 
         if (nextPatient) {
           const calledAt = new Date().toISOString();
@@ -417,8 +462,8 @@ class SupabaseQueueManager {
           return;
         }
 
-        if (this.channel) {
-          this.channel.send({
+        if (this.emergencyChannel) {
+          this.emergencyChannel.send({
             type: "broadcast",
             event: "emergencyRequestSubmitted",
             payload: { tokenNumber, reason }
@@ -467,8 +512,8 @@ class SupabaseQueueManager {
           }
         }
 
-        if (this.channel) {
-          this.channel.send({
+        if (this.emergencyChannel) {
+          this.emergencyChannel.send({
             type: "broadcast",
             event: "emergencyRequestReviewed",
             payload: { tokenNumber, status }

@@ -140,11 +140,15 @@ export default function PatientPage() {
   const currentToken = queueState?.currentToken || "—";
   const averageConsultationTime = queueState?.averageConsultationTime || 5;
   
-  // Sort waiting patients: check-in order (FIFO)
+  // Sort waiting patients: emergency first, then by check-in order (FIFO)
   const waitingPatients = queueState?.waitingPatients
     ? [...queueState.waitingPatients]
         .filter(p => p.status === "waiting")
-        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        .sort((a, b) => {
+          if (a.isEmergency && !b.isEmergency) return -1;
+          if (!a.isEmergency && b.isEmergency) return 1;
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        })
     : [];
   
   // Find my patient details in the full queue list
@@ -194,21 +198,27 @@ export default function PatientPage() {
     
     steps.push({ label: `Serving: ${currentToken}`, active: true, isYou: false });
     
+    const youLabel = `${myToken} (You)${myPatientRecord?.isEmergency ? " 🚨" : ""}`;
+
     if (indexInWaiting === 0) {
       // You are next up
       steps.push({ label: "You are next up!", active: true, isYou: true });
     } else if (indexInWaiting === 1) {
-      steps.push({ label: waitingPatients[0].tokenNumber, active: false, isYou: false });
-      steps.push({ label: `${myToken} (You)`, active: true, isYou: true });
+      const p0Label = waitingPatients[0].tokenNumber + (waitingPatients[0].isEmergency ? " 🚨" : "");
+      steps.push({ label: p0Label, active: false, isYou: false });
+      steps.push({ label: youLabel, active: true, isYou: true });
     } else if (indexInWaiting === 2) {
-      steps.push({ label: waitingPatients[0].tokenNumber, active: false, isYou: false });
-      steps.push({ label: waitingPatients[1].tokenNumber, active: false, isYou: false });
-      steps.push({ label: `${myToken} (You)`, active: true, isYou: true });
+      const p0Label = waitingPatients[0].tokenNumber + (waitingPatients[0].isEmergency ? " 🚨" : "");
+      const p1Label = waitingPatients[1].tokenNumber + (waitingPatients[1].isEmergency ? " 🚨" : "");
+      steps.push({ label: p0Label, active: false, isYou: false });
+      steps.push({ label: p1Label, active: false, isYou: false });
+      steps.push({ label: youLabel, active: true, isYou: true });
     } else {
       // Collapse intermediate patients for readability
-      steps.push({ label: `Next: ${waitingPatients[0].tokenNumber}`, active: false, isYou: false });
+      const p0Label = `Next: ${waitingPatients[0].tokenNumber}${waitingPatients[0].isEmergency ? " 🚨" : ""}`;
+      steps.push({ label: p0Label, active: false, isYou: false });
       steps.push({ label: `${indexInWaiting - 1} patients ahead`, active: false, isYou: false });
-      steps.push({ label: `${myToken} (You)`, active: true, isYou: true });
+      steps.push({ label: youLabel, active: true, isYou: true });
     }
 
     return (
@@ -339,9 +349,13 @@ export default function PatientPage() {
                     <button
                       key={patient.id}
                       onClick={() => handleQuickSelect(patient.tokenNumber)}
-                      className="px-3.5 py-2 rounded-xl bg-[var(--card-bg)] border border-[var(--card-border)] text-slate-700 dark:text-slate-300 font-extrabold font-mono text-xs transition-all hover:bg-[var(--clinic-primary-light)] hover:text-[var(--clinic-primary)] hover:border-[var(--clinic-primary)]/45 hover:scale-105 active:scale-95 cursor-pointer shadow-sm backdrop-blur-md"
+                      className={`px-3.5 py-2 rounded-xl border font-extrabold font-mono text-xs transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-sm backdrop-blur-md ${
+                        patient.isEmergency
+                          ? "bg-rose-500/10 border-rose-500/30 text-rose-655 dark:text-rose-455 hover:bg-rose-500/15"
+                          : "bg-[var(--card-bg)] border-[var(--card-border)] text-slate-700 dark:text-slate-300 hover:bg-[var(--clinic-primary-light)] hover:text-[var(--clinic-primary)] hover:border-[var(--clinic-primary)]/45"
+                      }`}
                     >
-                      {patient.tokenNumber}
+                      {patient.tokenNumber} {patient.isEmergency && "🚨"}
                     </button>
                   ))}
                 </div>
