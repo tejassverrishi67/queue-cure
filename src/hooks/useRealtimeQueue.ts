@@ -11,6 +11,16 @@ export interface Patient {
   createdAt: string;
   calledAt?: string;
   status: "waiting" | "called";
+  isEmergency?: boolean;
+}
+
+export interface EmergencyRequest {
+  id: string;
+  tokenNumber: string;
+  reason: string;
+  status: "pending" | "approved" | "rejected";
+  createdAt: string;
+  reviewedAt?: string;
 }
 
 export interface QueueState {
@@ -18,6 +28,7 @@ export interface QueueState {
   averageConsultationTime: number;
   waitingPatients: Patient[];
   lastTokenIndex: number;
+  emergencyRequests?: EmergencyRequest[];
 }
 
 export type EventPayloadMap = {
@@ -26,6 +37,8 @@ export type EventPayloadMap = {
   tokenAdvanced: { currentToken: string; patientName: string };
   queueReset: undefined;
   consultationTimeUpdated: { minutes: number };
+  emergencyRequestSubmitted: { tokenNumber: string; reason: string };
+  emergencyRequestReviewed: { tokenNumber: string; status: "approved" | "rejected" };
   connect: undefined;
   disconnect: undefined;
 };
@@ -36,6 +49,8 @@ export type ActionPayloadMap = {
   tokenAdvanced: undefined;
   queueReset: undefined;
   consultationTimeUpdated: { minutes: number };
+  emergencyRequestSubmitted: { tokenNumber: string; reason: string };
+  emergencyRequestReviewed: { requestId: string; tokenNumber: string; status: "approved" | "rejected" };
 };
 
 type Listener<K extends keyof EventPayloadMap> = (payload: EventPayloadMap[K]) => void;
@@ -122,6 +137,12 @@ class SupabaseQueueManager {
       })
       .on("broadcast", { event: "consultationTimeUpdated" }, ({ payload }: { payload: { minutes: number } }) => {
         this.dispatch("consultationTimeUpdated", payload);
+      })
+      .on("broadcast", { event: "emergencyRequestSubmitted" }, ({ payload }: { payload: { tokenNumber: string; reason: string } }) => {
+        this.dispatch("emergencyRequestSubmitted", payload);
+      })
+      .on("broadcast", { event: "emergencyRequestReviewed" }, ({ payload }: { payload: { tokenNumber: string; status: "approved" | "rejected" } }) => {
+        this.dispatch("emergencyRequestReviewed", payload);
       });
 
     // Wire up database change listeners to automatically refetch state on updates
@@ -136,6 +157,13 @@ class SupabaseQueueManager {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "queue_settings" },
+        () => {
+          this.fetchAndPublishState();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "emergency_requests" },
         () => {
           this.fetchAndPublishState();
         }
@@ -197,6 +225,16 @@ class SupabaseQueueManager {
         return;
       }
 
+      // Fetch all emergency requests from the DB sorted by creation order
+      const { data: emergencyRequests, error: emergencyError } = await supabase
+        .from("emergency_requests")
+        .select("*")
+        .order("created_at", { ascending: true });
+
+      if (emergencyError) {
+        console.error("[SupabaseQueue] Error fetching emergency requests:", emergencyError);
+      }
+
       // Construct QueueState structure
       this.queueState = {
         currentToken: currentSettings?.current_token || null,
@@ -207,9 +245,18 @@ class SupabaseQueueManager {
           tokenNumber: p.token_number,
           createdAt: p.created_at,
           calledAt: p.called_at || undefined,
-          status: p.status as "waiting" | "called"
+          status: p.status as "waiting" | "called",
+          isEmergency: p.is_emergency || false
         })),
-        lastTokenIndex: currentSettings?.last_token_index ?? 0
+        lastTokenIndex: currentSettings?.last_token_index ?? 0,
+        emergencyRequests: (emergencyRequests || []).map(r => ({
+          id: r.id,
+          tokenNumber: r.token_number,
+          reason: r.reason,
+          status: r.status as "pending" | "approved" | "rejected",
+          createdAt: r.created_at,
+          reviewedAt: r.reviewed_at || undefined
+        }))
       };
 
       this.dispatch("queueUpdated", this.queueState);
@@ -284,6 +331,7 @@ class SupabaseQueueManager {
           .from("patients")
           .select("*")
           .eq("status", "waiting")
+          .order("is_emergency", { ascending: false })
           .order("created_at", { ascending: true })
           .limit(1)
           .maybeSingle();
@@ -350,8 +398,95 @@ class SupabaseQueueManager {
       }
     }
 
+    if (event === "emergencyRequestSubmitted") {
+      const payload = data as { tokenNumber: string; reason: string };
+      if (!payload || !payload.tokenNumber || !payload.reason) return;
+      const { tokenNumber, reason } = payload;
+
+      try {
+        const { error } = await supabase
+          .from("emergency_requests")
+          .insert({
+            token_number: tokenNumber,
+            reason: reason,
+            status: "pending",
+            created_at: new Date().toISOString()
+          });
+
+        if (error) {
+          console.error("[SupabaseQueue] Error creating emergency request:", error);
+          return;
+        }
+
+        if (this.channel) {
+          this.channel.send({
+            type: "broadcast",
+            event: "emergencyRequestSubmitted",
+            payload: { tokenNumber, reason }
+          });
+        }
+
+        this.dispatch("emergencyRequestSubmitted", { tokenNumber, reason });
+        await this.fetchAndPublishState();
+      } catch (err) {
+        console.error("[SupabaseQueue] Failed to submit emergency request:", err);
+      }
+    }
+
+    if (event === "emergencyRequestReviewed") {
+      const payload = data as { requestId: string; tokenNumber: string; status: "approved" | "rejected" };
+      if (!payload || !payload.requestId || !payload.tokenNumber || !payload.status) return;
+      const { requestId, tokenNumber, status } = payload;
+
+      try {
+        const reviewedAt = new Date().toISOString();
+
+        // 1. Update emergency request status
+        const { error: requestError } = await supabase
+          .from("emergency_requests")
+          .update({
+            status,
+            reviewed_at: reviewedAt
+          })
+          .eq("id", requestId);
+
+        if (requestError) {
+          console.error("[SupabaseQueue] Error updating emergency request:", requestError);
+          return;
+        }
+
+        // 2. If approved, mark patient as emergency in patients table
+        if (status === "approved") {
+          const { error: patientError } = await supabase
+            .from("patients")
+            .update({ is_emergency: true })
+            .eq("token_number", tokenNumber)
+            .eq("status", "waiting"); // Only waiting patients can be set to emergency
+
+          if (patientError) {
+            console.error("[SupabaseQueue] Error setting patient emergency status:", patientError);
+          }
+        }
+
+        if (this.channel) {
+          this.channel.send({
+            type: "broadcast",
+            event: "emergencyRequestReviewed",
+            payload: { tokenNumber, status }
+          });
+        }
+
+        this.dispatch("emergencyRequestReviewed", { tokenNumber, status });
+        await this.fetchAndPublishState();
+      } catch (err) {
+        console.error("[SupabaseQueue] Failed to review emergency request:", err);
+      }
+    }
+
     if (event === "queueReset") {
       try {
+        // Clear emergency requests and patients tables
+        await supabase.from("emergency_requests").delete().neq("id", "00000000-0000-0000-0000-000000000000");
         await supabase.from("patients").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 
         await supabase

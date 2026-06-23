@@ -72,12 +72,24 @@ export default function ReceptionistPage() {
       addToast(`Consultation duration set to ${data.minutes} mins`, "info");
     };
 
+    const handleEmergencyRequestSubmitted = (data: { tokenNumber: string; reason: string }) => {
+      console.log("[Receptionist] Emergency request submitted broadcast:", data);
+      addToast(`🚨 Emergency request submitted for Token ${data.tokenNumber}!`, "error");
+    };
+
+    const handleEmergencyRequestReviewed = (data: { tokenNumber: string; status: "approved" | "rejected" }) => {
+      console.log("[Receptionist] Emergency request reviewed broadcast:", data);
+      addToast(`Emergency request for ${data.tokenNumber} ${data.status}.`, data.status === "approved" ? "success" : "info");
+    };
+
     // Subscriptions
     queueManager.on("queueUpdated", handleQueueUpdated);
     queueManager.on("patientAdded", handlePatientAdded);
     queueManager.on("tokenAdvanced", handleTokenAdvanced);
     queueManager.on("queueReset", handleQueueReset);
     queueManager.on("consultationTimeUpdated", handleConsultationTimeUpdated);
+    queueManager.on("emergencyRequestSubmitted", handleEmergencyRequestSubmitted);
+    queueManager.on("emergencyRequestReviewed", handleEmergencyRequestReviewed);
 
     // Initial state request handshake
     queueManager.sendAction("queueUpdated");
@@ -89,6 +101,8 @@ export default function ReceptionistPage() {
       queueManager.off("tokenAdvanced", handleTokenAdvanced);
       queueManager.off("queueReset", handleQueueReset);
       queueManager.off("consultationTimeUpdated", handleConsultationTimeUpdated);
+      queueManager.off("emergencyRequestSubmitted", handleEmergencyRequestSubmitted);
+      queueManager.off("emergencyRequestReviewed", handleEmergencyRequestReviewed);
     };
   }, [queueManager, addToast]);
 
@@ -177,18 +191,59 @@ export default function ReceptionistPage() {
     }
   };
 
+  const handleReviewEmergency = (requestId: string, tokenNumber: string, status: "approved" | "rejected") => {
+    if (!queueManager) return;
+    queueManager.sendAction("emergencyRequestReviewed", {
+      requestId,
+      tokenNumber,
+      status
+    });
+  };
+
   // Derived state from authoritative QueueState only
-  const waitingPatients = queueState?.waitingPatients.filter(p => p.status === "waiting") || [];
+  // Sort waiting patients: emergency first, then by check-in order (FIFO)
+  const waitingPatients = queueState?.waitingPatients
+    ? [...queueState.waitingPatients]
+        .filter(p => p.status === "waiting")
+        .sort((a, b) => {
+          if (a.isEmergency && !b.isEmergency) return -1;
+          if (!a.isEmergency && b.isEmergency) return 1;
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        })
+    : [];
+
   const calledPatients = queueState?.waitingPatients.filter(p => p.status === "called") || [];
   
-  // Show most recently called first in history
-  const sortedCalledPatients = [...calledPatients].reverse();
+  // Show most recently called first in history, sorted by calledAt DESC
+  const sortedCalledPatients = [...calledPatients].sort((a, b) => {
+    const timeA = a.calledAt ? new Date(a.calledAt).getTime() : 0;
+    const timeB = b.calledAt ? new Date(b.calledAt).getTime() : 0;
+    return timeB - timeA;
+  });
 
   const currentToken = queueState?.currentToken || "—";
   const nextPatient = waitingPatients[0];
   const nextToken = nextPatient ? nextPatient.tokenNumber : "—";
   const queueLength = waitingPatients.length;
   const avgConsultation = queueState?.averageConsultationTime || 5;
+
+  // Sort: pending first, then approved, then rejected.
+  // Within pending: oldest first (to handle FIFO review)
+  // Within others: newest first (to see recent decisions)
+  const sortedEmergencyRequests = queueState?.emergencyRequests
+    ? [...queueState.emergencyRequests].sort((a, b) => {
+        const statusOrder = { pending: 0, approved: 1, rejected: 2 };
+        if (statusOrder[a.status] !== statusOrder[b.status]) {
+          return statusOrder[a.status] - statusOrder[b.status];
+        }
+        const timeA = new Date(a.createdAt).getTime();
+        const timeB = new Date(b.createdAt).getTime();
+        if (a.status === "pending") {
+          return timeA - timeB; // oldest pending first
+        }
+        return timeB - timeA; // newest reviewed first
+      })
+    : [];
 
   // Lightweight analytics calculations
   const patientsServedCount = calledPatients.length;
@@ -542,9 +597,7 @@ export default function ReceptionistPage() {
             </div>
           </div>
 
-        </div>
-
-        {/* Right Column: Live Analytics & Dual list view (Side-by-Side) */}
+         {/* Right Column: Live Analytics & Dual list view (Side-by-Side) */}
         <div className="lg:col-span-2 space-y-6 flex flex-col">
           
           {/* Clinic Analytics Section */}
@@ -575,6 +628,75 @@ export default function ReceptionistPage() {
                 </span>
               </div>
             </div>
+          </div>
+
+          {/* 🚨 Emergency Requests Card */}
+          <div className="glass-card p-6 border-rose-500/20 bg-rose-500/5 space-y-4">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+              <h2 className="text-base font-extrabold text-slate-850 dark:text-slate-100 flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                  🚨
+                </span>
+                Emergency Requests
+              </h2>
+              <span className="text-[10px] text-slate-400 dark:text-slate-500 font-extrabold uppercase tracking-wider">
+                Receptionist Review
+              </span>
+            </div>
+
+            {sortedEmergencyRequests.length === 0 ? (
+              <div className="text-center py-6 text-slate-450 dark:text-slate-500 text-xs font-semibold">
+                No active emergency priority requests.
+              </div>
+            ) : (
+              <div className="space-y-4 divide-y divide-slate-100 dark:divide-slate-800 max-h-[300px] overflow-y-auto pr-1">
+                {sortedEmergencyRequests.map((req) => (
+                  <div key={req.id} className="pt-4 first:pt-0 flex flex-col md:flex-row md:items-center justify-between gap-4 animate-fade-in">
+                    <div className="space-y-1.5 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400 font-extrabold font-mono text-xs border border-rose-500/20">
+                          {req.tokenNumber}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-semibold">
+                          Time Submitted: {formatTime(req.createdAt)}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold tracking-wide flex items-center gap-1 ${
+                          req.status === "pending"
+                            ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                            : req.status === "approved"
+                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                              : "bg-slate-500/10 text-slate-500 dark:text-slate-400 border border-slate-500/20"
+                        }`}>
+                          {req.status === "pending" && "🟠 Pending"}
+                          {req.status === "approved" && "🟢 Approved"}
+                          {req.status === "rejected" && "⚪ Rejected"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-700 dark:text-slate-300 font-semibold leading-relaxed break-words">
+                        {req.reason}
+                      </p>
+                    </div>
+
+                    {req.status === "pending" && (
+                      <div className="flex gap-2 shrink-0 self-end md:self-center">
+                        <button
+                          onClick={() => handleReviewEmergency(req.id, req.tokenNumber, "approved")}
+                          className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] flex items-center gap-1 transition-colors cursor-pointer border-none shadow-md shadow-emerald-500/10 hover:shadow-emerald-500/20"
+                        >
+                          ✅ Approve Priority
+                        </button>
+                        <button
+                          onClick={() => handleReviewEmergency(req.id, req.tokenNumber, "rejected")}
+                          className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-[11px] flex items-center gap-1 transition-colors cursor-pointer border-none shadow-md shadow-rose-500/10 hover:shadow-rose-500/20"
+                        >
+                          ❌ Reject Request
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Dual List Subgrid (Side-by-Side to eliminate excessive scroll) */}
@@ -613,12 +735,17 @@ export default function ReceptionistPage() {
                         className="py-3 first:pt-0 last:pb-0 flex items-center justify-between gap-3 animate-fade-in"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="h-10 w-14 bg-[var(--clinic-primary)]/10 text-[var(--clinic-primary)] rounded-xl flex items-center justify-center font-extrabold font-mono text-sm tracking-wide border border-[var(--clinic-primary)]/20">
+                          <div className={`h-10 w-14 rounded-xl flex items-center justify-center font-extrabold font-mono text-sm tracking-wide border ${
+                            patient.isEmergency 
+                              ? "bg-rose-500/10 text-rose-600 dark:text-rose-455 border-rose-500/30 animate-pulse" 
+                              : "bg-[var(--clinic-primary)]/10 text-[var(--clinic-primary)] border-[var(--clinic-primary)]/20"
+                          }`}>
                             {patient.tokenNumber}
                           </div>
                           <div>
-                            <p className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate max-w-[90px]">
+                            <p className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate max-w-[90px] flex items-center gap-1">
                               {patient.name}
+                              {patient.isEmergency && <span className="text-rose-600 animate-pulse" title="Emergency Priority">🚨</span>}
                             </p>
                             <span className="text-[10px] text-slate-400 flex items-center gap-0.5 mt-0.5 font-semibold">
                               <Clock className="w-3 h-3 text-slate-450" />
@@ -631,6 +758,10 @@ export default function ReceptionistPage() {
                           {index === 0 ? (
                             <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[9px] font-extrabold tracking-wider uppercase animate-pulse">
                               Next Up
+                            </span>
+                          ) : patient.isEmergency ? (
+                            <span className="px-2 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[9px] font-extrabold tracking-wider uppercase animate-pulse">
+                              Emergency
                             </span>
                           ) : (
                             <span className="px-2 py-0.5 rounded bg-[var(--card-bg)] border border-[var(--card-border)] text-slate-500 dark:text-slate-400 text-[9px] font-bold">
@@ -668,7 +799,7 @@ export default function ReceptionistPage() {
                 {sortedCalledPatients.length === 0 ? (
                   <div className="h-full flex flex-col justify-center items-center text-center py-16 text-slate-400">
                     <Clock className="w-8 h-8 text-slate-350 dark:text-slate-700 mb-2" />
-                    <p className="font-bold text-xs text-slate-500 dark:text-slate-450">No Called Patients</p>
+                    <p className="font-bold text-xs text-slate-500 dark:text-slate-455">No Called Patients</p>
                     <p className="text-[10px] mt-0.5 max-w-[150px] mx-auto text-slate-400">Patients will appear here once called.</p>
                   </div>
                 ) : (
@@ -678,8 +809,12 @@ export default function ReceptionistPage() {
                       className="py-3.5 first:pt-0 last:pb-0 flex items-center justify-between gap-3 text-xs animate-fade-in"
                     >
                       <div className="flex items-center gap-3">
-                        <span className="font-bold font-mono text-xs text-slate-650 dark:text-slate-400 bg-[var(--card-bg)] px-2 py-0.5 rounded border border-[var(--card-border)]">
-                          {patient.tokenNumber}
+                        <span className={`font-bold font-mono text-xs px-2 py-0.5 rounded border ${
+                          patient.isEmergency
+                            ? "bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400 animate-pulse"
+                            : "bg-[var(--card-bg)] border-[var(--card-border)] text-slate-650 dark:text-slate-400"
+                        }`}>
+                          {patient.tokenNumber} {patient.isEmergency && "🚨"}
                         </span>
                         <div>
                           <p className="font-extrabold text-slate-750 dark:text-slate-200 truncate max-w-[100px]">
@@ -704,6 +839,7 @@ export default function ReceptionistPage() {
               </div>
             </div>
 
+          </div>
           </div>
 
         </div>

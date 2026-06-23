@@ -4,7 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { 
   useRealtimeQueue, 
-  QueueState 
+  QueueState,
+  Patient
 } from "@/hooks/useRealtimeQueue";
 import ThemeToggle from "@/components/ThemeToggle";
 import { useToast } from "@/components/Toast";
@@ -16,8 +17,10 @@ import {
   ArrowRight,
   UserCheck,
   MapPin,
-  Calendar
+  Calendar,
+  ShieldAlert
 } from "lucide-react";
+import EmergencyRequestModal from "@/components/EmergencyRequestModal";
 
 export default function PatientPage() {
   const { queueManager } = useRealtimeQueue();
@@ -25,6 +28,8 @@ export default function PatientPage() {
   const [queueState, setQueueState] = useState<QueueState | null>(null);
   const [myTokenInput, setMyTokenInput] = useState("");
   const [myToken, setMyToken] = useState<string | null>(null);
+  const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
+
 
   // Reference to keep track of the current token in listeners
   const myTokenRef = useRef(myToken);
@@ -60,11 +65,28 @@ export default function PatientPage() {
       addToast(`Estimated wait durations adjusted.`, "info");
     };
 
+    const handleEmergencyRequestSubmitted = (data: { tokenNumber: string; reason: string }) => {
+      console.log("[Patient] Emergency request submitted broadcast:", data);
+    };
+
+    const handleEmergencyRequestReviewed = (data: { tokenNumber: string; status: "approved" | "rejected" }) => {
+      console.log("[Patient] Emergency request reviewed broadcast:", data);
+      if (data.tokenNumber === myTokenRef.current) {
+        if (data.status === "approved") {
+          addToast("Your emergency priority request has been APPROVED!", "success");
+        } else {
+          addToast("Your emergency priority request was declined.", "warning");
+        }
+      }
+    };
+
     // Subscriptions
     queueManager.on("queueUpdated", handleQueueUpdated);
     queueManager.on("tokenAdvanced", handleTokenAdvanced);
     queueManager.on("queueReset", handleQueueReset);
     queueManager.on("consultationTimeUpdated", handleConsultationTimeUpdated);
+    queueManager.on("emergencyRequestSubmitted", handleEmergencyRequestSubmitted);
+    queueManager.on("emergencyRequestReviewed", handleEmergencyRequestReviewed);
 
     // Initial state request handshake
     queueManager.sendAction("queueUpdated");
@@ -75,6 +97,8 @@ export default function PatientPage() {
       queueManager.off("tokenAdvanced", handleTokenAdvanced);
       queueManager.off("queueReset", handleQueueReset);
       queueManager.off("consultationTimeUpdated", handleConsultationTimeUpdated);
+      queueManager.off("emergencyRequestSubmitted", handleEmergencyRequestSubmitted);
+      queueManager.off("emergencyRequestReviewed", handleEmergencyRequestReviewed);
     };
   }, [queueManager, addToast]);
 
@@ -115,10 +139,27 @@ export default function PatientPage() {
   // Derived calculations from state (always single source of truth)
   const currentToken = queueState?.currentToken || "—";
   const averageConsultationTime = queueState?.averageConsultationTime || 5;
-  const waitingPatients = queueState?.waitingPatients.filter(p => p.status === "waiting") || [];
+  
+  // Sort waiting patients: emergency first, then by check-in order (FIFO)
+  const waitingPatients = queueState?.waitingPatients
+    ? [...queueState.waitingPatients]
+        .filter(p => p.status === "waiting")
+        .sort((a, b) => {
+          if (a.isEmergency && !b.isEmergency) return -1;
+          if (!a.isEmergency && b.isEmergency) return 1;
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        })
+    : [];
   
   // Find my patient details in the full queue list
   const myPatientRecord = queueState?.waitingPatients.find(p => p.tokenNumber === myToken);
+
+  // Find my latest emergency request status
+  const myEmergencyRequest = queueState?.emergencyRequests && myToken
+    ? [...queueState.emergencyRequests]
+        .filter(r => r.tokenNumber === myToken)
+        .reverse()[0] || null
+    : null;
   
   let tokensAhead = 0;
   let estimatedWait = 0;
@@ -157,21 +198,27 @@ export default function PatientPage() {
     
     steps.push({ label: `Serving: ${currentToken}`, active: true, isYou: false });
     
+    const youLabel = `${myToken} (You)${myPatientRecord?.isEmergency ? " 🚨" : ""}`;
+
     if (indexInWaiting === 0) {
       // You are next up
       steps.push({ label: "You are next up!", active: true, isYou: true });
     } else if (indexInWaiting === 1) {
-      steps.push({ label: waitingPatients[0].tokenNumber, active: false, isYou: false });
-      steps.push({ label: `${myToken} (You)`, active: true, isYou: true });
+      const p0Label = waitingPatients[0].tokenNumber + (waitingPatients[0].isEmergency ? " 🚨" : "");
+      steps.push({ label: p0Label, active: false, isYou: false });
+      steps.push({ label: youLabel, active: true, isYou: true });
     } else if (indexInWaiting === 2) {
-      steps.push({ label: waitingPatients[0].tokenNumber, active: false, isYou: false });
-      steps.push({ label: waitingPatients[1].tokenNumber, active: false, isYou: false });
-      steps.push({ label: `${myToken} (You)`, active: true, isYou: true });
+      const p0Label = waitingPatients[0].tokenNumber + (waitingPatients[0].isEmergency ? " 🚨" : "");
+      const p1Label = waitingPatients[1].tokenNumber + (waitingPatients[1].isEmergency ? " 🚨" : "");
+      steps.push({ label: p0Label, active: false, isYou: false });
+      steps.push({ label: p1Label, active: false, isYou: false });
+      steps.push({ label: youLabel, active: true, isYou: true });
     } else {
       // Collapse intermediate patients for readability
-      steps.push({ label: `Next: ${waitingPatients[0].tokenNumber}`, active: false, isYou: false });
+      const p0Label = `Next: ${waitingPatients[0].tokenNumber}${waitingPatients[0].isEmergency ? " 🚨" : ""}`;
+      steps.push({ label: p0Label, active: false, isYou: false });
       steps.push({ label: `${indexInWaiting - 1} patients ahead`, active: false, isYou: false });
-      steps.push({ label: `${myToken} (You)`, active: true, isYou: true });
+      steps.push({ label: youLabel, active: true, isYou: true });
     }
 
     return (
@@ -302,9 +349,13 @@ export default function PatientPage() {
                     <button
                       key={patient.id}
                       onClick={() => handleQuickSelect(patient.tokenNumber)}
-                      className="px-3.5 py-2 rounded-xl bg-[var(--card-bg)] border border-[var(--card-border)] text-slate-700 dark:text-slate-300 font-extrabold font-mono text-xs transition-all hover:bg-[var(--clinic-primary-light)] hover:text-[var(--clinic-primary)] hover:border-[var(--clinic-primary)]/45 hover:scale-105 active:scale-95 cursor-pointer shadow-sm backdrop-blur-md"
+                      className={`px-3.5 py-2 rounded-xl border font-extrabold font-mono text-xs transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-sm backdrop-blur-md ${
+                        patient.isEmergency
+                          ? "bg-rose-500/10 border-rose-500/30 text-rose-650 dark:text-rose-455 hover:bg-rose-500/15"
+                          : "bg-[var(--card-bg)] border-[var(--card-border)] text-slate-700 dark:text-slate-300 hover:bg-[var(--clinic-primary-light)] hover:text-[var(--clinic-primary)] hover:border-[var(--clinic-primary)]/45"
+                      }`}
                     >
-                      {patient.tokenNumber}
+                      {patient.tokenNumber} {patient.isEmergency && "🚨"}
                     </button>
                   ))}
                 </div>
@@ -454,6 +505,40 @@ export default function PatientPage() {
               </div>
             )}
 
+            {/* Emergency Request Status section */}
+            {myEmergencyRequest && (
+              <div className={`p-5 rounded-2xl border text-center space-y-3 animate-slide-up ${
+                myEmergencyRequest.status === "pending"
+                  ? "border-amber-500/25 bg-amber-500/5 text-amber-855 dark:text-amber-300"
+                  : myEmergencyRequest.status === "approved"
+                    ? "border-emerald-500/25 bg-emerald-550/5 text-emerald-855 dark:text-emerald-300"
+                    : "border-slate-500/25 bg-slate-500/5 text-slate-700 dark:text-slate-400"
+              }`}>
+                <div className="flex flex-col items-center gap-2">
+                  <div className="flex items-center gap-1.5 text-2xs font-extrabold uppercase tracking-wider">
+                    <ShieldAlert className="w-4 h-4 shrink-0 text-current" />
+                    Emergency Priority Status
+                  </div>
+                  <span className={`px-3 py-1 rounded-full text-xs font-extrabold tracking-wide inline-block ${
+                    myEmergencyRequest.status === "pending"
+                      ? "bg-amber-550/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                      : myEmergencyRequest.status === "approved"
+                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                        : "bg-slate-500/10 text-slate-550 dark:text-slate-400 border border-slate-500/20"
+                  }`}>
+                    {myEmergencyRequest.status === "pending" && "🟠 Awaiting receptionist review"}
+                    {myEmergencyRequest.status === "approved" && "🚨 Emergency priority approved"}
+                    {myEmergencyRequest.status === "rejected" && "⚪ Emergency priority declined"}
+                  </span>
+                  <p className="text-xs font-semibold leading-relaxed max-w-sm mt-1">
+                    {myEmergencyRequest.status === "pending" && "Emergency request submitted. Clinic staff will review it shortly."}
+                    {myEmergencyRequest.status === "approved" && "Emergency priority approved."}
+                    {myEmergencyRequest.status === "rejected" && "Your emergency request was reviewed. Please continue waiting for your scheduled turn."}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Quick Action bar: change/clear token */}
             <div className="flex justify-center">
               <button
@@ -468,7 +553,41 @@ export default function PatientPage() {
           </div>
         )}
 
+        {/* Emergency Request Trigger Card */}
+        {(!myEmergencyRequest || myEmergencyRequest.status === "rejected") && (
+          <div className="w-full max-w-md md:max-w-lg mx-auto mt-8 border border-rose-500/15 bg-rose-500/5 dark:bg-rose-500/5 rounded-3xl p-5 text-center sm:text-left sm:flex sm:items-center sm:justify-between gap-5 transition-all animate-slide-up">
+            <div className="flex-1 space-y-1">
+              <h3 className="text-sm font-extrabold text-slate-850 dark:text-slate-105 flex items-center justify-center sm:justify-start gap-1.5">
+                <span className="text-base text-rose-600 dark:text-rose-400">🚨</span>
+                Emergency Priority Request
+              </h3>
+              <p className="text-2xs text-slate-500 dark:text-slate-400 font-semibold leading-normal max-w-sm">
+                Experiencing chest pain, breathing difficulty, severe bleeding, or child with high fever? Request immediate priority clinical review.
+              </p>
+            </div>
+            <button
+              onClick={() => setIsRequestModalOpen(true)}
+              className="mt-4 sm:mt-0 px-4 py-3 bg-rose-655 hover:bg-rose-750 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-rose-500/10 hover:shadow-rose-500/20 active:scale-[0.98] transition-all cursor-pointer border-none shrink-0"
+            >
+              Request Emergency Priority
+            </button>
+          </div>
+        )}
+
       </main>
+
+      <EmergencyRequestModal
+        isOpen={isRequestModalOpen}
+        onClose={() => setIsRequestModalOpen(false)}
+        initialToken={myToken || ""}
+        onSubmit={async (token, reason) => {
+          if (!queueManager) return;
+          await queueManager.sendAction("emergencyRequestSubmitted", {
+            tokenNumber: token,
+            reason: reason
+          });
+        }}
+      />
     </div>
   );
 }

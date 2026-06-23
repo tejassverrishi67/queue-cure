@@ -70,3 +70,44 @@ CREATE POLICY "Allow public select settings" ON public.queue_settings FOR SELECT
 CREATE POLICY "Allow public insert settings" ON public.queue_settings FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update settings" ON public.queue_settings FOR UPDATE USING (true);
 CREATE POLICY "Allow public delete settings" ON public.queue_settings FOR DELETE USING (true);
+
+-- 9. Add is_emergency column to Patients table
+ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS is_emergency BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- 10. Create Emergency Requests Table
+CREATE TABLE IF NOT EXISTS public.emergency_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    token_number TEXT NOT NULL,
+    reason TEXT NOT NULL CHECK (char_length(reason) <= 250),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    reviewed_at TIMESTAMPTZ
+);
+
+-- 11. Enable Full Replica Identity for rich real-time update payloads
+ALTER TABLE public.emergency_requests REPLICA IDENTITY FULL;
+
+-- 12. Enable Realtime Replication for emergency_requests table
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'emergency_requests') THEN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.emergency_requests;
+    END IF;
+  END IF;
+END $$;
+
+-- 13. Enable Row Level Security (RLS)
+ALTER TABLE public.emergency_requests ENABLE ROW LEVEL SECURITY;
+
+-- 14. Reset and Apply Public RLS Policies for Emergency Requests
+DROP POLICY IF EXISTS "Allow public select emergency_requests" ON public.emergency_requests;
+DROP POLICY IF EXISTS "Allow public insert emergency_requests" ON public.emergency_requests;
+DROP POLICY IF EXISTS "Allow public update emergency_requests" ON public.emergency_requests;
+DROP POLICY IF EXISTS "Allow public delete emergency_requests" ON public.emergency_requests;
+
+CREATE POLICY "Allow public select emergency_requests" ON public.emergency_requests FOR SELECT USING (true);
+CREATE POLICY "Allow public insert emergency_requests" ON public.emergency_requests FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update emergency_requests" ON public.emergency_requests FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete emergency_requests" ON public.emergency_requests FOR DELETE USING (true);
+
