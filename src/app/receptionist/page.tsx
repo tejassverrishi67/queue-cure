@@ -596,6 +596,7 @@ export default function ReceptionistPage() {
               </div>
             </div>
           </div>
+        </div>
 
          {/* Right Column: Live Analytics & Dual list view (Side-by-Side) */}
         <div className="lg:col-span-2 space-y-6 flex flex-col">
@@ -840,8 +841,6 @@ export default function ReceptionistPage() {
             </div>
 
           </div>
-          </div>
-
         </div>
 
       </main>
