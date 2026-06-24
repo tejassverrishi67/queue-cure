@@ -4,23 +4,34 @@ from django.utils import timezone
 from analytics.models import Patient, QueueSettings, EmergencyRequest, AdminUser
 
 def get_mongo_uri():
-    # Check OS environment first (standard for production/deployment)
-    env_uri = os.environ.get('MONGODB_URI')
-    if env_uri:
-        return env_uri
+    # 1. Check MONGO_URI in OS environment
+    uri = os.environ.get('MONGO_URI')
+    if uri:
+        return uri
 
-    try:
-        # Resolve the relative path to server/.env
-        env_path = os.path.join(os.path.dirname(__file__), '../../server/.env')
-        if os.path.exists(env_path):
-            with open(env_path, 'r') as f:
-                for line in f:
-                    if line.strip().startswith('MONGODB_URI='):
-                        # Extract URI
-                        return line.split('=', 1)[1].strip()
-    except Exception as e:
-        print("[Sync] Error reading server .env file:", e)
-    return "mongodb://localhost:27017/queue-cure"
+    # 2. Check MONGODB_URI in OS environment
+    uri = os.environ.get('MONGODB_URI')
+    if uri:
+        return uri
+
+    # 3. Check server/.env fallback (development / non-Render environment only)
+    is_render = os.environ.get('RENDER') == 'true'
+    if not is_render:
+        try:
+            # Resolve the relative path to server/.env
+            env_path = os.path.join(os.path.dirname(__file__), '../../server/.env')
+            if os.path.exists(env_path):
+                with open(env_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith('MONGO_URI='):
+                            return line.split('=', 1)[1].strip()
+                        elif line.startswith('MONGODB_URI='):
+                            return line.split('=', 1)[1].strip()
+        except Exception as e:
+            print("[Sync] Error reading server .env file:", e)
+            
+    return None
 
 def make_utc_aware(dt):
     if dt is None:
@@ -32,14 +43,33 @@ def make_utc_aware(dt):
 
 def sync_mongodb_to_sqlite():
     uri = get_mongo_uri()
-    print(f"[Sync] Initiating PyMongo connection to: {uri}")
-    client = MongoClient(uri, serverSelectionTimeoutMS=2000)
+    if not uri:
+        error_msg = "MongoDB Connection Error: Neither MONGO_URI nor MONGODB_URI environment variables are set, and server/.env fallback is unavailable."
+        print(f"[Sync Error] {error_msg}")
+        raise ValueError(error_msg)
+        
+    # Production-only validation: Reject localhost in Render environment
+    is_render = os.environ.get('RENDER') == 'true'
+    if is_render and ("localhost" in uri or "127.0.0.1" in uri):
+        error_msg = "MongoDB Security Violation: Localhost MongoDB connections (localhost/127.0.0.1) are prohibited in production Render environments."
+        print(f"[Sync Error] {error_msg}")
+        raise ValueError(error_msg)
+        
+    print("[Sync] Initiating PyMongo connection to MongoDB...")
+    client = MongoClient(uri, serverSelectionTimeoutMS=5000)
     
     try:
         try:
             db = client.get_default_database()
         except Exception:
-            db = client['test']
+            # Fallback database extraction: derive database from URI
+            try:
+                from pymongo.uri_parser import parse_uri
+                parsed = parse_uri(uri)
+                db_name = parsed.get('database') or 'queue-cure'
+                db = client[db_name]
+            except Exception:
+                db = client['queue-cure']
         
         # 1. Sync QueueSettings
         settings_col = db['queuesettings']
