@@ -28,6 +28,15 @@ export default function PatientPage() {
   const [myTokenInput, setMyTokenInput] = useState("");
   const [myToken, setMyToken] = useState<string | null>(null);
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
+  const [isInvalidEntry, setIsInvalidEntry] = useState(false);
+
+  // Helper to check if token exists in active queue
+  const checkIfTokenExists = (token: string | null, state: QueueState | null) => {
+    if (!token || !state) return false;
+    const existsInPatients = state.waitingPatients.some(p => p.tokenNumber === token);
+    const isCurrentToken = state.currentToken === token && state.currentToken !== "—";
+    return existsInPatients || isCurrentToken;
+  };
 
 
   // Reference to keep track of the current token in listeners
@@ -121,22 +130,53 @@ export default function PatientPage() {
     }
   }, []);
 
+  // Monitor tracked token validity and automatically clear stale tracking states
+  useEffect(() => {
+    if (!queueState || !myToken) return;
+
+    const exists = checkIfTokenExists(myToken, queueState);
+
+    if (!exists) {
+      if (!isInvalidEntry) {
+        localStorage.removeItem("selectedToken");
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setMyToken(null);
+        setMyTokenInput("");
+        addToast("Your previously tracked token is no longer active.", "warning");
+      }
+    } else {
+      if (isInvalidEntry) {
+        setIsInvalidEntry(false);
+      }
+    }
+  }, [queueState, myToken, isInvalidEntry, addToast]);
+
   // Form submission: Track token
   const handleTrackToken = (e: React.FormEvent) => {
     e.preventDefault();
     if (!myTokenInput.trim()) return;
 
     const formattedToken = myTokenInput.trim().toUpperCase();
+    const exists = checkIfTokenExists(formattedToken, queueState);
+
     setMyToken(formattedToken);
     localStorage.setItem("selectedToken", formattedToken);
     setMyTokenInput("");
-    addToast(`Tracking Token ${formattedToken}`, "success");
+
+    if (exists) {
+      setIsInvalidEntry(false);
+      addToast(`Tracking Token ${formattedToken}`, "success");
+    } else {
+      setIsInvalidEntry(true);
+      addToast(`Tracking Token ${formattedToken}`, "success");
+    }
   };
 
   // Select token from quick-select list
   const handleQuickSelect = (token: string) => {
     setMyToken(token);
     localStorage.setItem("selectedToken", token);
+    setIsInvalidEntry(false);
     addToast(`Tracking Token ${token}`, "success");
   };
 
@@ -145,6 +185,7 @@ export default function PatientPage() {
     addToast(`Stopped tracking Token ${myToken}`, "info");
     setMyToken(null);
     localStorage.removeItem("selectedToken");
+    setIsInvalidEntry(false);
   };
 
   // Derived calculations from state (always single source of truth)

@@ -107,7 +107,22 @@ class SupabaseQueueManager {
   }
 
   private async init() {
-    if (typeof window === "undefined" || !supabase) {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (!supabase || (process.env.NEXT_PUBLIC_SUPABASE_URL || "").includes("your-supabase-project-id")) {
+      console.log("[MockQueue] Running in mock database mode (offline/placeholder env)");
+      this.connected = true;
+      this.isInitialized = true;
+      setTimeout(() => {
+        this.dispatch("connect", undefined);
+        this.dispatch("queueUpdated", this.queueState);
+      }, 50);
+      return;
+    }
+
+    if (!supabase) {
       if (!supabase) {
         console.warn("[SupabaseQueue] Supabase client is not available. Real-time updates and database operations are disabled.");
       }
@@ -203,7 +218,10 @@ class SupabaseQueueManager {
   }
 
   async fetchAndPublishState() {
-    if (!supabase) return;
+    if (!supabase || (process.env.NEXT_PUBLIC_SUPABASE_URL || "").includes("your-supabase-project-id")) {
+      this.dispatch("queueUpdated", this.queueState);
+      return;
+    }
 
     try {
       // Retrieve settings, upserting default configuration if row id = 1 is missing
@@ -293,6 +311,111 @@ class SupabaseQueueManager {
   }
 
   async sendAction<K extends keyof ActionPayloadMap>(event: K, data?: ActionPayloadMap[K]) {
+    if (!supabase || (process.env.NEXT_PUBLIC_SUPABASE_URL || "").includes("your-supabase-project-id")) {
+      if (event === "queueUpdated") {
+        this.dispatch("queueUpdated", this.queueState);
+        return;
+      }
+      if (event === "patientAdded") {
+        const payload = data as { name: string };
+        const name = payload.name.trim();
+        const nextIndex = this.queueState.lastTokenIndex + 1;
+        const newToken = `A${String(nextIndex).padStart(3, "0")}`;
+        this.queueState.lastTokenIndex = nextIndex;
+        this.queueState.waitingPatients.push({
+          id: Math.random().toString(),
+          name,
+          tokenNumber: newToken,
+          createdAt: new Date().toISOString(),
+          status: "waiting" as const,
+          isEmergency: false
+        });
+        this.dispatch("patientAdded", { name, tokenNumber: newToken });
+        this.dispatch("queueUpdated", this.queueState);
+        return;
+      }
+      if (event === "tokenAdvanced") {
+        const nextPatient = this.queueState.waitingPatients
+          .filter(p => p.status === "waiting")
+          .sort((a, b) => {
+            if (a.isEmergency && !b.isEmergency) return -1;
+            if (!a.isEmergency && b.isEmergency) return 1;
+            return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          })[0];
+        if (nextPatient) {
+          nextPatient.status = "called";
+          nextPatient.calledAt = new Date().toISOString();
+          this.queueState.currentToken = nextPatient.tokenNumber;
+          this.dispatch("tokenAdvanced", { currentToken: nextPatient.tokenNumber, patientName: nextPatient.name });
+          this.dispatch("queueUpdated", this.queueState);
+        } else {
+          throw new Error("No patients are waiting in the queue.");
+        }
+        return;
+      }
+      if (event === "consultationTimeUpdated") {
+        const payload = data as { minutes: number };
+        this.queueState.averageConsultationTime = payload.minutes;
+        this.dispatch("consultationTimeUpdated", { minutes: payload.minutes });
+        this.dispatch("queueUpdated", this.queueState);
+        return;
+      }
+      if (event === "emergencyRequestSubmitted") {
+        const payload = data as { tokenNumber: string; reason: string };
+        const tokenNumber = payload.tokenNumber.trim().toUpperCase();
+        
+        const patient = this.queueState.waitingPatients.find(p => p.tokenNumber === tokenNumber);
+        if (!patient) {
+          throw new Error("Token number is not registered in the active queue.");
+        }
+        if (patient.status !== "waiting") {
+          throw new Error("This token has already been called.");
+        }
+
+        this.queueState.emergencyRequests = this.queueState.emergencyRequests || [];
+        const newReq = {
+          id: Math.random().toString(),
+          tokenNumber,
+          reason: payload.reason,
+          status: "pending" as const,
+          createdAt: new Date().toISOString()
+        };
+        this.queueState.emergencyRequests.push(newReq);
+        this.dispatch("emergencyRequestSubmitted", { tokenNumber, reason: payload.reason });
+        this.dispatch("queueUpdated", this.queueState);
+        return;
+      }
+      if (event === "emergencyRequestReviewed") {
+        const payload = data as { requestId: string; tokenNumber: string; status: "approved" | "rejected" };
+        const req = this.queueState.emergencyRequests?.find(r => r.id === payload.requestId);
+        if (req) {
+          req.status = payload.status;
+          req.reviewedAt = new Date().toISOString();
+        }
+        if (payload.status === "approved") {
+          const patient = this.queueState.waitingPatients.find(p => p.tokenNumber === payload.tokenNumber);
+          if (patient) {
+            patient.isEmergency = true;
+          }
+        }
+        this.dispatch("emergencyRequestReviewed", { tokenNumber: payload.tokenNumber, status: payload.status });
+        this.dispatch("queueUpdated", this.queueState);
+        return;
+      }
+      if (event === "queueReset") {
+        this.queueState = {
+          currentToken: null,
+          averageConsultationTime: 5,
+          waitingPatients: [],
+          lastTokenIndex: 0,
+          emergencyRequests: []
+        };
+        this.dispatch("queueReset", undefined);
+        this.dispatch("queueUpdated", this.queueState);
+        return;
+      }
+    }
+
     if (!supabase) {
       throw new Error("Database connection is offline. Please check your configuration.");
     }
