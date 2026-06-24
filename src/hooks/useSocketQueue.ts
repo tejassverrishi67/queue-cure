@@ -76,7 +76,7 @@ class SocketQueueManager implements IQueueManager {
   private socketUrl: string;
 
   constructor() {
-    const defaultUrl = "http://localhost:5000";
+    const defaultUrl = "https://queue-cure-api-zlb0.onrender.com";
     this.socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || defaultUrl;
     this.init();
   }

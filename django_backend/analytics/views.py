@@ -125,7 +125,7 @@ def dashboard_view(request):
     perf = get_performance_stats()
     em = get_emergency_stats()
 
-    socket_url = os.environ.get('NEXT_PUBLIC_SOCKET_URL', 'http://localhost:5000')
+    socket_url = os.environ.get('NEXT_PUBLIC_SOCKET_URL', 'https://queue-cure-api-zlb0.onrender.com')
 
     context = {
         "total_patients": total_patients,

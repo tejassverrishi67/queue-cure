@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,7 +10,13 @@
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Socket.IO Client -->
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="{% static 'analytics/js/socket.io.min.js' %}"></script>
+    <script>
+        if (typeof io === 'undefined') {
+            console.warn("[Analytics Socket] Local Socket.IO script failed to load. Falling back to jsDelivr CDN.");
+            document.write('<script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.5/dist/socket.io.min.js"><\/script>');
+        }
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         body {
@@ -38,9 +45,9 @@
             </div>
             <div class="flex items-center space-x-4">
                 <!-- Live Analytics Indicator -->
-                <div class="flex items-center space-x-2 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800/80 border border-slate-700">
-                    <span id="liveIndicatorDot" class="w-2 h-2 rounded-full bg-rose-500"></span>
-                    <span id="liveIndicatorText" class="text-slate-300">Live Analytics Disconnected</span>
+                <div id="liveIndicatorContainer" class="flex items-center space-x-2 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800/80 border border-slate-700 text-slate-300">
+                    <span id="liveIndicatorDot" class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                    <span id="liveIndicatorText">Live Analytics Disconnected</span>
                 </div>
                 <button onclick="triggerSync()" id="syncBtn" class="flex items-center space-x-2 px-4 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 transition duration-200 shadow-md hover:shadow-indigo-600/30">
                     <svg id="syncIcon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -269,111 +276,157 @@
         }
 
         // Live Socket.IO Integrations & Dynamic Updates
+        const dot = document.getElementById('liveIndicatorDot');
+        const text = document.getElementById('liveIndicatorText');
+        const container = document.getElementById('liveIndicatorContainer');
+
+        function setStatus(state, message) {
+            if (!dot || !text || !container) return;
+            
+            // Reset classes
+            dot.className = "w-2.5 h-2.5 rounded-full";
+            
+            if (state === 'connected') {
+                dot.classList.add('bg-emerald-500', 'animate-pulse');
+                container.className = "flex items-center space-x-2 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-950/20 border border-emerald-500/30 text-emerald-400";
+                text.innerText = message || "Live Analytics Connected";
+            } else if (state === 'warning') {
+                dot.classList.add('bg-amber-500');
+                container.className = "flex items-center space-x-2 px-3 py-1.5 text-xs font-semibold rounded-lg bg-amber-950/20 border border-amber-500/30 text-amber-400";
+                text.innerText = message || "Live Sync Offline";
+            } else if (state === 'error') {
+                dot.classList.add('bg-rose-500');
+                container.className = "flex items-center space-x-2 px-3 py-1.5 text-xs font-semibold rounded-lg bg-rose-950/20 border border-rose-500/30 text-rose-400";
+                text.innerText = message || "Unexpected Error";
+            } else {
+                // disconnected/reconnecting
+                dot.classList.add('bg-rose-500');
+                container.className = "flex items-center space-x-2 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800/80 border border-slate-700 text-slate-300";
+                text.innerText = message || "Live Analytics Disconnected";
+            }
+        }
+
         let socket;
-        try {
-            socket = io("{{ socket_url|safe }}");
 
-            const dot = document.getElementById('liveIndicatorDot');
-            const text = document.getElementById('liveIndicatorText');
+        if (typeof io === 'undefined') {
+            console.warn("[Analytics Socket] Socket.IO client library (io) is not defined. Live connection bypassed.");
+            setStatus('warning', 'Live Sync Offline');
+        } else {
+            console.log("[Analytics Socket] Client library loaded successfully.");
+            try {
+                const targetUrl = "{{ socket_url|safe }}";
+                console.log("[Analytics Socket] Socket connecting to: " + targetUrl);
+                setStatus('disconnected', 'Socket Connecting...');
 
-            socket.on('connect', () => {
-                dot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse";
-                text.innerText = "Live Analytics Connected";
-            });
+                socket = io(targetUrl, {
+                    reconnectionAttempts: 5,
+                    timeout: 8000
+                });
 
-            socket.on('disconnect', () => {
-                dot.className = "w-2.5 h-2.5 rounded-full bg-rose-500";
-                text.innerText = "Live Analytics Disconnected";
-            });
+                socket.on('connect', () => {
+                    console.log("[Analytics Socket] Socket connected successfully.");
+                    setStatus('connected', 'Live Analytics Connected');
+                });
 
-            // State variables for debounce and guards
-            let debounceTimer = null;
-            let syncInProgress = false;
+                socket.on('disconnect', (reason) => {
+                    console.log("[Analytics Socket] Socket disconnected: " + reason);
+                    setStatus('disconnected', 'Live Analytics Disconnected');
+                });
 
-            const handleMutation = () => {
-                if (debounceTimer) {
-                    clearTimeout(debounceTimer);
-                }
+                socket.on('connect_error', (err) => {
+                    console.warn("[Analytics Socket] Connection error: ", err);
+                    setStatus('warning', 'Server Unreachable');
+                });
 
-                debounceTimer = setTimeout(async () => {
-                    if (syncInProgress) {
-                        console.warn("[Analytics Socket] Sync currently running. Queued event ignored.");
-                        return;
+                // State variables for debounce and guards
+                let debounceTimer = null;
+                let syncInProgress = false;
+
+                const handleMutation = () => {
+                    if (debounceTimer) {
+                        clearTimeout(debounceTimer);
                     }
 
-                    syncInProgress = true;
-                    console.log("[Analytics Socket] Syncing MongoDB cache...");
-
-                    try {
-                        // 1. Sync Mongo data to SQLite cache
-                        const syncResponse = await fetch('/analytics/sync', { method: 'POST' });
-                        const syncResult = await syncResponse.json();
-                        if (!syncResult.success) {
-                            throw new Error(syncResult.error || "Sync execution error");
+                    debounceTimer = setTimeout(async () => {
+                        if (syncInProgress) {
+                            console.warn("[Analytics Socket] Sync currently running. Queued event ignored.");
+                            return;
                         }
 
-                        // 2. Fetch updated statistics
-                        const [summaryRes, emergenciesRes, performanceRes] = await Promise.all([
-                            fetch('/analytics/summary'),
-                            fetch('/analytics/emergencies'),
-                            fetch('/analytics/performance')
-                        ]);
+                        syncInProgress = true;
+                        console.log("[Analytics Socket] Syncing MongoDB cache...");
 
-                        const summary = await summaryRes.json();
-                        const emergencies = await emergenciesRes.json();
-                        const performance = await performanceRes.json();
+                        try {
+                            // 1. Sync Mongo data to SQLite cache
+                            const syncResponse = await fetch('/analytics/sync', { method: 'POST' });
+                            const syncResult = await syncResponse.json();
+                            if (!syncResult.success) {
+                                throw new Error(syncResult.error || "Sync execution error");
+                            }
 
-                        // 3. Update DOM Card components dynamically
-                        document.getElementById('totalPatientsVal').innerText = summary.totalPatients;
-                        document.getElementById('waitingPatientsVal').innerText = summary.waitingPatients;
-                        
-                        document.getElementById('calledPatientsVal').innerText = summary.calledPatients;
-                        // Served patients count in complete records desc
-                        const calledRecordsText = summary.totalPatients > 0 ? summary.calledPatients : '0';
-                        document.getElementById('calledRecordsDesc').innerText = calledRecordsText;
+                            // 2. Fetch updated statistics
+                            const [summaryRes, emergenciesRes, performanceRes] = await Promise.all([
+                                fetch('/analytics/summary'),
+                                fetch('/analytics/emergencies'),
+                                fetch('/analytics/performance')
+                            ]);
 
-                        document.getElementById('emergencyRequestsVal').innerText = summary.emergencyRequests;
-                        document.getElementById('approvalRateVal').innerText = summary.approvalRate + '%';
+                            const summary = await summaryRes.json();
+                            const emergencies = await emergenciesRes.json();
+                            const performance = await performanceRes.json();
 
-                        document.getElementById('averageWaitTimeVal').innerText = summary.averageWaitTimeMinutes + 'm';
-                        document.getElementById('peakHourVal').innerText = summary.peakHour;
+                            // 3. Update DOM Card components dynamically
+                            document.getElementById('totalPatientsVal').innerText = summary.totalPatients;
+                            document.getElementById('waitingPatientsVal').innerText = summary.waitingPatients;
+                            
+                            document.getElementById('calledPatientsVal').innerText = summary.calledPatients;
+                            const calledRecordsText = summary.totalPatients > 0 ? summary.calledPatients : '0';
+                            document.getElementById('calledRecordsDesc').innerText = calledRecordsText;
 
-                        // 4. Update Chart.js datasets dynamically
-                        volumeChart.data.datasets[0].data = summary.registrationsByHour;
-                        volumeChart.data.datasets[1].data = summary.emergenciesByHour;
-                        volumeChart.update();
+                            document.getElementById('emergencyRequestsVal').innerText = summary.emergencyRequests;
+                            document.getElementById('approvalRateVal').innerText = summary.approvalRate + '%';
 
-                        throughputChart.data.datasets[0].data = summary.throughputByHour;
-                        throughputChart.update();
+                            document.getElementById('averageWaitTimeVal').innerText = summary.averageWaitTimeMinutes + 'm';
+                            document.getElementById('peakHourVal').innerText = summary.peakHour;
 
-                        console.log("[Analytics Socket] Analytics charts & cards updated successfully.");
-                    } catch (err) {
-                        console.error("[Analytics Socket] Live update task failed:", err);
-                    } finally {
-                        syncInProgress = false;
-                    }
-                }, 2000); // 2-second debounce
-            };
+                            // 4. Update Chart.js datasets dynamically
+                            volumeChart.data.datasets[0].data = summary.registrationsByHour;
+                            volumeChart.data.datasets[1].data = summary.emergenciesByHour;
+                            volumeChart.update();
 
-            // Register mutation event handlers
-            const events = [
-                'queueUpdated',
-                'patientAdded',
-                'tokenAdvanced',
-                'emergencyRequestSubmitted',
-                'emergencyRequestReviewed',
-                'queueReset'
-            ];
+                            throughputChart.data.datasets[0].data = summary.throughputByHour;
+                            throughputChart.update();
 
-            events.forEach(event => {
-                socket.on(event, (payload) => {
-                    console.log(`[Analytics Socket] Received trigger event: ${event}`);
-                    handleMutation();
+                            console.log("[Analytics Socket] Analytics charts & cards updated successfully.");
+                        } catch (err) {
+                            console.error("[Analytics Socket] Live update task failed:", err);
+                        } finally {
+                            syncInProgress = false;
+                        }
+                    }, 2000); // 2-second debounce
+                };
+
+                // Register mutation event handlers
+                const events = [
+                    'queueUpdated',
+                    'patientAdded',
+                    'tokenAdvanced',
+                    'emergencyRequestSubmitted',
+                    'emergencyRequestReviewed',
+                    'queueReset'
+                ];
+
+                events.forEach(event => {
+                    socket.on(event, (payload) => {
+                        console.log(`[Analytics Socket] Received trigger event: ${event}`);
+                        handleMutation();
+                    });
                 });
-            });
 
-        } catch (err) {
-            console.error("[Analytics Socket] Failed to connect to Socket.IO:", err);
+            } catch (err) {
+                console.error("[Analytics Socket] Unexpected error during initialization:", err);
+                setStatus('error', 'Unexpected Error');
+            }
         }
     </script>
 </body>

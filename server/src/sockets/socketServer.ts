@@ -11,8 +11,14 @@ let connectionCount = 0;
 export const initSocketServer = (server: HttpServer): SocketIOServer => {
   io = new SocketIOServer(server, {
     cors: {
-      origin: "*",
-      methods: ["GET", "POST", "PUT"]
+      origin: [
+        "https://queue-cure-analytics.onrender.com",
+        "https://queue-cure-virid.vercel.app",
+        "http://localhost:3000",
+        "http://localhost:8000"
+      ],
+      methods: ["GET", "POST", "PUT"],
+      credentials: true
     }
   });
 
