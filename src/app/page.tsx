@@ -16,7 +16,7 @@ import {
 import { useRealtimeQueue, QueueState } from "@/hooks/useRealtimeQueue";
 
 export default function HomePage() {
-  const { queueManager, isConnected } = useRealtimeQueue();
+  const { queueManager } = useRealtimeQueue();
   const [queueState, setQueueState] = useState<QueueState | null>(null);
 
   useEffect(() => {

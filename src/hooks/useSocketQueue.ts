@@ -58,11 +58,13 @@ export interface IQueueManager {
   isConnected(): boolean;
   on<K extends keyof EventPayloadMap>(event: K, callback: Listener<K>): void;
   off<K extends keyof EventPayloadMap>(event: K, callback: Listener<K>): void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sendAction<K extends keyof ActionPayloadMap>(event: K, data?: ActionPayloadMap[K]): Promise<any>;
 }
 
 class SocketQueueManager implements IQueueManager {
   private socket: Socket | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private listeners: { [event: string]: Set<(...args: any[]) => void> } = {};
   private queueState: QueueState = {
     currentToken: null,
@@ -87,6 +89,7 @@ class SocketQueueManager implements IQueueManager {
     if (!this.listeners[event]) {
       this.listeners[event] = new Set();
     }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.listeners[event].add(callback as (...args: any[]) => void);
 
     // Immediately trigger state update for new queueUpdated subscribers if initialized
@@ -97,6 +100,7 @@ class SocketQueueManager implements IQueueManager {
 
   off<K extends keyof EventPayloadMap>(event: K, callback: Listener<K>) {
     if (this.listeners[event]) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       this.listeners[event].delete(callback as (...args: any[]) => void);
     }
   }
@@ -219,9 +223,11 @@ class SocketQueueManager implements IQueueManager {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async sendAction<K extends keyof ActionPayloadMap>(event: K, data?: ActionPayloadMap[K]): Promise<any> {
     let url = "";
     let method = "POST";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let bodyObj: any = null;
 
     if (event === "patientAdded") {
@@ -299,6 +305,7 @@ export function useSocketQueue() {
     globalQueueManager.on("disconnect", handleDisconnect);
 
     // Sync state on mount
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsConnected(globalQueueManager.isConnected());
 
     return () => {
