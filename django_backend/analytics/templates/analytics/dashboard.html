@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Queue Cure '26 Analytics Dashboard</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Socket.IO Client -->
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #0b0f19;
+            color: #f1f5f9;
+        }
+    </style>
+</head>
+<body class="min-h-screen pb-12">
+    <!-- Header -->
+    <header class="border-b border-slate-800 bg-[#0f172a]/80 backdrop-blur-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2" />
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold tracking-tight text-white flex items-center">
+                        Queue Cure <span class="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">Analytics</span>
+                    </h1>
+                    <p class="text-xs text-slate-400">Live Administration & Performance Panel</p>
+                </div>
+            </div>
+            <div class="flex items-center space-x-4">
+                <!-- Live Analytics Indicator -->
+                <div class="flex items-center space-x-2 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800/80 border border-slate-700">
+                    <span id="liveIndicatorDot" class="w-2 h-2 rounded-full bg-rose-500"></span>
+                    <span id="liveIndicatorText" class="text-slate-300">Live Analytics Disconnected</span>
+                </div>
+                <button onclick="triggerSync()" id="syncBtn" class="flex items-center space-x-2 px-4 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 transition duration-200 shadow-md hover:shadow-indigo-600/30">
+                    <svg id="syncIcon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18.2" />
+                    </svg>
+                    <span>Sync MongoDB Data</span>
+                </button>
+                <a href="/admin/" target="_blank" class="px-4 py-2 text-sm font-semibold rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 transition duration-200 border border-slate-700">
+                    Django Admin
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-6 mt-8">
+        <!-- Status Toast -->
+        <div id="toast" class="hidden fixed bottom-6 right-6 px-5 py-3 rounded-lg text-sm font-medium shadow-xl transition-all duration-300 z-50"></div>
+
+        <!-- Metric Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <!-- Card 1 -->
+            <div class="rounded-2xl border border-slate-800 bg-[#0f172a] p-6 shadow-md">
+                <div class="flex items-center justify-between">
+                    <p class="text-sm font-medium text-slate-400">Total Patients</p>
+                    <div class="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                        </svg>
+                    </div>
+                </div>
+                <h3 id="totalPatientsVal" class="text-3xl font-bold mt-4 tracking-tight text-white">{{ total_patients }}</h3>
+                <p class="text-xs text-slate-400 mt-2"><span id="waitingPatientsVal" class="text-blue-400">{{ waiting_patients }}</span> waiting currently</p>
+            </div>
+
+            <!-- Card 2 -->
+            <div class="rounded-2xl border border-slate-800 bg-[#0f172a] p-6 shadow-md">
+                <div class="flex items-center justify-between">
+                    <p class="text-sm font-medium text-slate-400">Served Patients</p>
+                    <div class="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                </div>
+                <h3 id="calledPatientsVal" class="text-3xl font-bold mt-4 tracking-tight text-white">{{ called_patients }}</h3>
+                <p class="text-xs text-slate-400 mt-2"><span id="calledRecordsDesc" class="text-emerald-400">{% if total_patients > 0 %}{{ called_patients|add:"0" }}{% else %}0{% endif %}</span> complete records</p>
+            </div>
+
+            <!-- Card 3 -->
+            <div class="rounded-2xl border border-slate-800 bg-[#0f172a] p-6 shadow-md">
+                <div class="flex items-center justify-between">
+                    <p class="text-sm font-medium text-slate-400">Emergency Submissions</p>
+                    <div class="w-8 h-8 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                    </div>
+                </div>
+                <h3 id="emergencyRequestsVal" class="text-3xl font-bold mt-4 tracking-tight text-white">{{ emergency_requests }}</h3>
+                <p class="text-xs text-slate-400 mt-2"><span id="approvalRateVal" class="text-rose-400">{{ approval_rate }}%</span> approval review rate</p>
+            </div>
+
+            <!-- Card 4 -->
+            <div class="rounded-2xl border border-slate-800 bg-[#0f172a] p-6 shadow-md">
+                <div class="flex items-center justify-between">
+                    <p class="text-sm font-medium text-slate-400">Queue Efficiency</p>
+                    <div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                </div>
+                <h3 id="averageWaitTimeVal" class="text-3xl font-bold mt-4 tracking-tight text-white">{{ average_wait_time }}m</h3>
+                <p class="text-xs text-slate-400 mt-2">Peak hours today: <span id="peakHourVal" class="text-amber-400">{{ peak_hour }}</span></p>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
+            <!-- Registrations & Emergencies Chart -->
+            <div class="rounded-2xl border border-slate-800 bg-[#0f172a] p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h4 class="text-lg font-bold text-white">Daily Hourly Volumes</h4>
+                    <p class="text-xs text-slate-400">Patient registration vs emergencies</p>
+                </div>
+                <div class="h-[300px]">
+                    <canvas id="hourlyVolumeChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Throughput Chart -->
+            <div class="rounded-2xl border border-slate-800 bg-[#0f172a] p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h4 class="text-lg font-bold text-white">Called Patients Throughput</h4>
+                    <p class="text-xs text-slate-400">Volume called by hour of day</p>
+                </div>
+                <div class="h-[300px]">
+                    <canvas id="throughputChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Chart Configuration Script -->
+    <script>
+        // Parse data from Django Context safely
+        const hoursLabels = {{ hours_labels|safe }};
+        const registrationsData = {{ registrations_by_hour|safe }};
+        const emergenciesData = {{ emergencies_by_hour|safe }};
+        const throughputData = {{ throughput_by_hour|safe }};
+
+        // Render Hourly Volumes Chart
+        const ctxVolume = document.getElementById('hourlyVolumeChart').getContext('2d');
+        const volumeChart = new Chart(ctxVolume, {
+            type: 'line',
+            data: {
+                labels: hoursLabels,
+                datasets: [
+                    {
+                        label: 'Registrations',
+                        data: registrationsData,
+                        borderColor: '#6366f1',
+                        backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    },
+                    {
+                        label: 'Emergencies',
+                        data: emergenciesData,
+                        borderColor: '#f43f5e',
+                        backgroundColor: 'rgba(244, 63, 94, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        labels: { color: '#94a3b8' }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: '#1e293b' },
+                        ticks: { color: '#94a3b8' }
+                    },
+                    y: {
+                        grid: { color: '#1e293b' },
+                        ticks: { color: '#94a3b8', stepSize: 1 }
+                    }
+                }
+            }
+        });
+
+        // Render Throughput Chart
+        const ctxThroughput = document.getElementById('throughputChart').getContext('2d');
+        const throughputChart = new Chart(ctxThroughput, {
+            type: 'bar',
+            data: {
+                labels: hoursLabels,
+                datasets: [
+                    {
+                        label: 'Throughput (Called Patients)',
+                        data: throughputData,
+                        backgroundColor: 'rgba(16, 185, 129, 0.8)',
+                        borderRadius: 6
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        labels: { color: '#94a3b8' }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: '#1e293b' },
+                        ticks: { color: '#94a3b8' }
+                    },
+                    y: {
+                        grid: { color: '#1e293b' },
+                        ticks: { color: '#94a3b8', stepSize: 1 }
+                    }
+                }
+            }
+        });
+
+        // Manual Sync API trigger
+        async function triggerSync() {
+            const btn = document.getElementById('syncBtn');
+            const icon = document.getElementById('syncIcon');
+            const toast = document.getElementById('toast');
+
+            // Apply spin animation
+            icon.classList.add('animate-spin');
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('/analytics/sync', { method: 'POST' });
+                const result = await response.json();
+                
+                toast.classList.remove('hidden', 'bg-rose-500/90', 'text-rose-100');
+                toast.classList.add('bg-emerald-500/90', 'text-emerald-100');
+                toast.innerText = '✓ Sync completed successfully!';
+                
+                // Reload in 1.5 seconds to refresh visual metrics
+                setTimeout(() => window.location.reload(), 1500);
+
+            } catch (err) {
+                console.error(err);
+                toast.classList.remove('hidden', 'bg-emerald-500/90', 'text-emerald-100');
+                toast.classList.add('bg-rose-500/90', 'text-rose-100');
+                toast.innerText = '❌ Sync failed: ' + err.message;
+            } finally {
+                setTimeout(() => {
+                    icon.classList.remove('animate-spin');
+                    btn.disabled = false;
+                }, 1000);
+            }
+        }
+
+        // Live Socket.IO Integrations & Dynamic Updates
+        let socket;
+        try {
+            socket = io("{{ socket_url|safe }}");
+
+            const dot = document.getElementById('liveIndicatorDot');
+            const text = document.getElementById('liveIndicatorText');
+
+            socket.on('connect', () => {
+                dot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse";
+                text.innerText = "Live Analytics Connected";
+            });
+
+            socket.on('disconnect', () => {
+                dot.className = "w-2.5 h-2.5 rounded-full bg-rose-500";
+                text.innerText = "Live Analytics Disconnected";
+            });
+
+            // State variables for debounce and guards
+            let debounceTimer = null;
+            let syncInProgress = false;
+
+            const handleMutation = () => {
+                if (debounceTimer) {
+                    clearTimeout(debounceTimer);
+                }
+
+                debounceTimer = setTimeout(async () => {
+                    if (syncInProgress) {
+                        console.warn("[Analytics Socket] Sync currently running. Queued event ignored.");
+                        return;
+                    }
+
+                    syncInProgress = true;
+                    console.log("[Analytics Socket] Syncing MongoDB cache...");
+
+                    try {
+                        // 1. Sync Mongo data to SQLite cache
+                        const syncResponse = await fetch('/analytics/sync', { method: 'POST' });
+                        const syncResult = await syncResponse.json();
+                        if (!syncResult.success) {
+                            throw new Error(syncResult.error || "Sync execution error");
+                        }
+
+                        // 2. Fetch updated statistics
+                        const [summaryRes, emergenciesRes, performanceRes] = await Promise.all([
+                            fetch('/analytics/summary'),
+                            fetch('/analytics/emergencies'),
+                            fetch('/analytics/performance')
+                        ]);
+
+                        const summary = await summaryRes.json();
+                        const emergencies = await emergenciesRes.json();
+                        const performance = await performanceRes.json();
+
+                        // 3. Update DOM Card components dynamically
+                        document.getElementById('totalPatientsVal').innerText = summary.totalPatients;
+                        document.getElementById('waitingPatientsVal').innerText = summary.waitingPatients;
+                        
+                        document.getElementById('calledPatientsVal').innerText = summary.calledPatients;
+                        // Served patients count in complete records desc
+                        const calledRecordsText = summary.totalPatients > 0 ? summary.calledPatients : '0';
+                        document.getElementById('calledRecordsDesc').innerText = calledRecordsText;
+
+                        document.getElementById('emergencyRequestsVal').innerText = summary.emergencyRequests;
+                        document.getElementById('approvalRateVal').innerText = summary.approvalRate + '%';
+
+                        document.getElementById('averageWaitTimeVal').innerText = summary.averageWaitTimeMinutes + 'm';
+                        document.getElementById('peakHourVal').innerText = summary.peakHour;
+
+                        // 4. Update Chart.js datasets dynamically
+                        volumeChart.data.datasets[0].data = summary.registrationsByHour;
+                        volumeChart.data.datasets[1].data = summary.emergenciesByHour;
+                        volumeChart.update();
+
+                        throughputChart.data.datasets[0].data = summary.throughputByHour;
+                        throughputChart.update();
+
+                        console.log("[Analytics Socket] Analytics charts & cards updated successfully.");
+                    } catch (err) {
+                        console.error("[Analytics Socket] Live update task failed:", err);
+                    } finally {
+                        syncInProgress = false;
+                    }
+                }, 2000); // 2-second debounce
+            };
+
+            // Register mutation event handlers
+            const events = [
+                'queueUpdated',
+                'patientAdded',
+                'tokenAdvanced',
+                'emergencyRequestSubmitted',
+                'emergencyRequestReviewed',
+                'queueReset'
+            ];
+
+            events.forEach(event => {
+                socket.on(event, (payload) => {
+                    console.log(`[Analytics Socket] Received trigger event: ${event}`);
+                    handleMutation();
+                });
+            });
+
+        } catch (err) {
+            console.error("[Analytics Socket] Failed to connect to Socket.IO:", err);
+        }
+    </script>
+</body>
+</html>

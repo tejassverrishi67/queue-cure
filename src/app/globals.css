@@ -154,3 +154,81 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--clinic-primary);
 }
+
+/* Premium SaaS Shimmer Text Animation */
+@keyframes textShimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.animate-text-shimmer {
+  background-size: 200% auto;
+  animation: textShimmer 6s linear infinite;
+}
+
+/* Slow Floating Blob Background Animation */
+@keyframes floatBlob {
+  0% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  33% {
+    transform: translate(40px, -60px) scale(1.08);
+  }
+  66% {
+    transform: translate(-30px, 30px) scale(0.92);
+  }
+  100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+}
+
+.animate-float-blob {
+  animation: floatBlob 25s infinite ease-in-out;
+}
+
+.animation-delay-4000 {
+  animation-delay: 4s;
+}
+
+/* Animated Hero Text Shimmer */
+@keyframes shimmer {
+  0% {
+    background-position: -200% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
+.hero-title {
+  background: linear-gradient(
+    90deg,
+    #00b4d8,
+    #00f5a0,
+    #00b4d8
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 3s linear infinite;
+}
+
+/* Premium Portal Card Hover Effect */
+.card {
+  transition: all 0.2s ease;
+}
+
+.card:hover {
+  box-shadow: 0 0 20px rgba(0, 180, 216, 0.4);
+  transform: translateY(-4px);
+  transition: all 0.2s ease;
+}
+
+
