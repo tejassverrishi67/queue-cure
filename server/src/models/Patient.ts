@@ -5,15 +5,17 @@ export interface IPatient extends Document {
   tokenNumber: string;
   createdAt: Date;
   calledAt?: Date;
+  consultationStartedAt?: Date;
   status: "waiting" | "called";
   isEmergency: boolean;
 }
 
 const PatientSchema: Schema = new Schema({
-  name: { type: String, required: true, trim: true },
+  name: { type: String, required: true, trim: true, maxlength: 100 },
   tokenNumber: { type: String, required: true, unique: true, uppercase: true, trim: true },
   createdAt: { type: Date, default: Date.now },
   calledAt: { type: Date },
+  consultationStartedAt: { type: Date },
   status: { type: String, enum: ["waiting", "called"], default: "waiting" },
   isEmergency: { type: Boolean, default: false }
 });

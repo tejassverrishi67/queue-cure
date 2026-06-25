@@ -12,10 +12,10 @@ export const getEmergencies = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const requests = await EmergencyRequest.find({}).sort({ createdAt: 1 });
-    
+    const requests = await EmergencyRequest.find({}).sort({ createdAt: 1 }).lean();
+
     const formatted = requests.map(r => ({
-      id: r.id,
+      id: r._id,
       tokenNumber: r.tokenNumber,
       reason: r.reason,
       status: r.status,

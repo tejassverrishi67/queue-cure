@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { 
   useRealtimeQueue, 
@@ -49,58 +49,45 @@ export default function ReceptionistPage() {
   const [isResettingQueue, setIsResettingQueue] = useState(false);
   const [reviewingRequestIds, setReviewingRequestIds] = useState<Record<string, boolean>>({});
 
+  // Local consultation time for debounced input
+  const [localConsultTime, setLocalConsultTime] = useState<number | null>(null);
+  const consultTimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Ref-based toast to avoid unstable deps in useEffect
+  const addToastRef = useRef(addToast);
+  useEffect(() => { addToastRef.current = addToast; }, [addToast]);
+  const stableAddToast = useCallback((...args: Parameters<typeof addToast>) => addToastRef.current(...args), []);
+
   // Sync state on updates with complete lifecycle cleanup
   useEffect(() => {
     if (!queueManager) return;
 
     const handleQueueUpdated = (state: QueueState) => {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Receptionist] Queue state updated:", state);
-        console.log("[CLIENT]\nReceived queueUpdated\nCurrent Token: " + (state.currentToken || "null") + "\nQueue Length: " + state.waitingPatients.filter(p => p.status === "waiting").length + "\n");
-      }
       setQueueState(state);
     };
 
     const handlePatientAdded = (data: { name: string; tokenNumber: string }) => {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Receptionist] Patient added:", data);
-      }
-      addToast("Patient registered: " + data.name + " (" + data.tokenNumber + ")", "success");
+      stableAddToast("Patient registered: " + data.name + " (" + data.tokenNumber + ")", "success");
     };
 
     const handleTokenAdvanced = (data: { currentToken: string; patientName: string }) => {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Receptionist] Token called:", data);
-      }
-      addToast("Called next patient: " + data.patientName + " (" + data.currentToken + ")", "info");
+      stableAddToast("Called next patient: " + data.patientName + " (" + data.currentToken + ")", "info");
     };
 
     const handleQueueReset = () => {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Receptionist] Queue database reset");
-      }
-      addToast("Queue database cleared successfully", "warning");
+      stableAddToast("Queue database cleared successfully", "warning");
     };
 
     const handleConsultationTimeUpdated = (data: { minutes: number }) => {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Receptionist] Average consultation time updated:", data);
-      }
-      addToast("Consultation duration set to " + data.minutes + " mins", "info");
+      stableAddToast("Consultation duration set to " + data.minutes + " mins", "info");
     };
 
     const handleEmergencyRequestSubmitted = (data: { tokenNumber: string; reason: string }) => {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Receptionist] Emergency request submitted broadcast:", data);
-      }
-      addToast("🚨 Emergency request submitted for Token " + data.tokenNumber + "!", "error");
+      stableAddToast("🚨 Emergency request submitted for Token " + data.tokenNumber + "!", "error");
     };
 
     const handleEmergencyRequestReviewed = (data: { tokenNumber: string; status: "approved" | "rejected" }) => {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Receptionist] Emergency request reviewed broadcast:", data);
-      }
-      addToast("Emergency request for " + data.tokenNumber + " " + data.status + ".", data.status === "approved" ? "success" : "info");
+      stableAddToast("Emergency request for " + data.tokenNumber + " " + data.status + ".", data.status === "approved" ? "success" : "info");
     };
 
     // Subscriptions
@@ -112,9 +99,6 @@ export default function ReceptionistPage() {
     queueManager.on("emergencyRequestSubmitted", handleEmergencyRequestSubmitted);
     queueManager.on("emergencyRequestReviewed", handleEmergencyRequestReviewed);
 
-    // Initial state request handshake
-    queueManager.sendAction("queueUpdated");
-
     // Cleanup listeners
     return () => {
       queueManager.off("queueUpdated", handleQueueUpdated);
@@ -125,7 +109,7 @@ export default function ReceptionistPage() {
       queueManager.off("emergencyRequestSubmitted", handleEmergencyRequestSubmitted);
       queueManager.off("emergencyRequestReviewed", handleEmergencyRequestReviewed);
     };
-  }, [queueManager, addToast]);
+  }, [queueManager, stableAddToast]);
 
   // Check auth session storage on mount to avoid server-side render mismatch
   useEffect(() => {
@@ -152,22 +136,33 @@ export default function ReceptionistPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isLoggedIn]);
 
-  // Handlers for authentication
-  const handleLogin = (e: React.FormEvent) => {
+  // Handlers for authentication — calls real backend API
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoggingIn) return;
     setIsLoggingIn(true);
-    
-    // Simulate slight lag for a premium feel
-    setTimeout(() => {
-      if (username.trim() === "admin" && password === "admin") {
+
+    try {
+      const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "https://queue-cure-api-zlb0.onrender.com";
+      const res = await fetch(`${socketUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username.trim(), password })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
         sessionStorage.setItem("isAdmin", "true");
         setIsLoggedIn(true);
         addToast("Logged in successfully", "success");
       } else {
-        addToast("Invalid username or password", "error");
+        addToast(data.error || "Invalid username or password", "error");
       }
+    } catch {
+      addToast("Unable to reach server. Please try again.", "error");
+    } finally {
       setIsLoggingIn(false);
-    }, 450);
+    }
   };
 
   // Handlers for logout
@@ -213,7 +208,7 @@ export default function ReceptionistPage() {
     }
   };
 
-  // Update Consultation Time
+  // Update Consultation Time — debounced to avoid API call on every keystroke
   const handleUpdateConsultationTime = async (val: number) => {
     if (!queueManager || isUpdatingConsultTime) return;
     if (val < 1 || val > 60) {
@@ -230,6 +225,27 @@ export default function ReceptionistPage() {
       setIsUpdatingConsultTime(false);
     }
   };
+
+  // Debounced handler for consultation time input changes
+  const handleConsultTimeInputChange = (val: number) => {
+    if (isNaN(val) || val < 1) return;
+    setLocalConsultTime(val);
+    if (consultTimeDebounceRef.current) {
+      clearTimeout(consultTimeDebounceRef.current);
+    }
+    consultTimeDebounceRef.current = setTimeout(() => {
+      handleUpdateConsultationTime(val);
+    }, 600);
+  };
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (consultTimeDebounceRef.current) {
+        clearTimeout(consultTimeDebounceRef.current);
+      }
+    };
+  }, []);
 
   // Reset Queue
   const handleResetQueue = async () => {
@@ -688,8 +704,8 @@ export default function ReceptionistPage() {
                     min="1"
                     max="60"
                     disabled={isUpdatingConsultTime}
-                    value={avgConsultation}
-                    onChange={(e) => handleUpdateConsultationTime(parseInt(e.target.value, 10) || 1)}
+                    value={localConsultTime !== null ? localConsultTime : avgConsultation}
+                    onChange={(e) => handleConsultTimeInputChange(parseInt(e.target.value, 10) || 1)}
                     className="w-full text-center bg-transparent border-none outline-none font-extrabold text-sm text-slate-800 dark:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                   <span className="text-xs text-slate-400 font-extrabold ml-1">min</span>

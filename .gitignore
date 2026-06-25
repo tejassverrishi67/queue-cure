@@ -7,7 +7,9 @@ build/
 .env
 .env.local
 .env.production
+server/.env
 
 django_backend/db.sqlite3
+django_backend/venv/
 
 __pycache__/

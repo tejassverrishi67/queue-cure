@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { 
   useRealtimeQueue, 
@@ -30,6 +30,11 @@ export default function PatientPage() {
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
   const [isInvalidEntry, setIsInvalidEntry] = useState(false);
 
+  // Ref-based toast to avoid unstable deps in useEffect
+  const addToastRef = useRef(addToast);
+  useEffect(() => { addToastRef.current = addToast; }, [addToast]);
+  const stableAddToast = useCallback((...args: Parameters<typeof addToast>) => addToastRef.current(...args), []);
+
   // Helper to check if token exists in active queue
   const checkIfTokenExists = (token: string | null, state: QueueState | null) => {
     if (!token || !state) return false;
@@ -51,51 +56,32 @@ export default function PatientPage() {
     if (!queueManager) return;
 
     const handleQueueUpdated = (state: QueueState) => {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Patient] Queue state updated:", state);
-        console.log(`[CLIENT]\nReceived queueUpdated\nCurrent Token: ${state.currentToken || "null"}\nQueue Length: ${state.waitingPatients.filter(p => p.status === "waiting").length}\n`);
-      }
       setQueueState(state);
     };
 
     const handleTokenAdvanced = (data: { currentToken: string; patientName: string }) => {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Patient] Token advanced:", data);
-      }
-      
       // Display general call toast
-      addToast(`Token Called: ${data.currentToken}`, "info");
+      stableAddToast(`Token Called: ${data.currentToken}`, "info");
     };
 
     const handleQueueReset = () => {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Patient] Queue database reset");
-      }
-      addToast("Queue state has been reset by the clinic", "warning");
+      stableAddToast("Queue state has been reset by the clinic", "warning");
     };
 
-    const handleConsultationTimeUpdated = (data: { minutes: number }) => {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Patient] Clinic consultation time updated:", data);
-      }
-      addToast(`Estimated wait durations adjusted.`, "info");
+    const handleConsultationTimeUpdated = () => {
+      stableAddToast(`Estimated wait durations adjusted.`, "info");
     };
 
-    const handleEmergencyRequestSubmitted = (data: { tokenNumber: string; reason: string }) => {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Patient] Emergency request submitted broadcast:", data);
-      }
+    const handleEmergencyRequestSubmitted = () => {
+      // No patient-facing toast for submissions (receptionist sees it)
     };
 
     const handleEmergencyRequestReviewed = (data: { tokenNumber: string; status: "approved" | "rejected" }) => {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Patient] Emergency request reviewed broadcast:", data);
-      }
       if (data.tokenNumber === myTokenRef.current) {
         if (data.status === "approved") {
-          addToast("Your emergency priority request has been APPROVED!", "success");
+          stableAddToast("Your emergency priority request has been APPROVED!", "success");
         } else {
-          addToast("Your emergency priority request was declined.", "warning");
+          stableAddToast("Your emergency priority request was declined.", "warning");
         }
       }
     };
@@ -108,9 +94,6 @@ export default function PatientPage() {
     queueManager.on("emergencyRequestSubmitted", handleEmergencyRequestSubmitted);
     queueManager.on("emergencyRequestReviewed", handleEmergencyRequestReviewed);
 
-    // Initial state request handshake
-    queueManager.sendAction("queueUpdated");
-
     // Cleanup listeners on unmount
     return () => {
       queueManager.off("queueUpdated", handleQueueUpdated);
@@ -120,7 +103,7 @@ export default function PatientPage() {
       queueManager.off("emergencyRequestSubmitted", handleEmergencyRequestSubmitted);
       queueManager.off("emergencyRequestReviewed", handleEmergencyRequestReviewed);
     };
-  }, [queueManager, addToast]);
+  }, [queueManager, stableAddToast]);
 
   // Load state from localStorage on mount
   useEffect(() => {
@@ -139,17 +122,16 @@ export default function PatientPage() {
     if (!exists) {
       if (!isInvalidEntry) {
         localStorage.removeItem("selectedToken");
-        // eslint-disable-next-line react-hooks/set-state-in-effect
         setMyToken(null);
         setMyTokenInput("");
-        addToast("Your previously tracked token is no longer active.", "warning");
+        stableAddToast("Your previously tracked token is no longer active.", "warning");
       }
     } else {
       if (isInvalidEntry) {
         setIsInvalidEntry(false);
       }
     }
-  }, [queueState, myToken, isInvalidEntry, addToast]);
+  }, [queueState, myToken, isInvalidEntry, stableAddToast]);
 
   // Form submission: Track token
   const handleTrackToken = (e: React.FormEvent) => {

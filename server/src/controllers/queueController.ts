@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import Patient from "../models/Patient";
-import QueueSettings from "../models/QueueSettings";
+import QueueSettings, { IQueueSettings } from "../models/QueueSettings";
 import EmergencyRequest from "../models/EmergencyRequest";
 import {
   emitConsultationTimeUpdated,
@@ -14,11 +14,13 @@ export const getSettings = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const settings = await QueueSettings.findOne({ configId: 1 });
+    const settings = await QueueSettings.findOne({ configId: 1 }).lean<IQueueSettings>();
     res.json({
       currentToken: settings?.currentToken || null,
       averageConsultationTime: settings?.averageConsultationTime ?? 5,
-      lastTokenIndex: settings?.lastTokenIndex ?? 0
+      lastTokenIndex: settings?.lastTokenIndex ?? 0,
+      totalServed: settings?.totalServed ?? 0,
+      totalRegistered: settings?.totalRegistered ?? 0
     });
   } catch (error) {
     next(error);
@@ -71,11 +73,13 @@ export const callNextPatient = async (
   next: NextFunction
 ): Promise<any> => {
   try {
+    const now = new Date();
+
     // Atomically find the next waiting patient and mark them as called in a single query.
     // This prevents race conditions or double clicks calling the same patient multiple times.
     const nextPatient = await Patient.findOneAndUpdate(
       { status: "waiting" },
-      { $set: { status: "called", calledAt: new Date() } },
+      { $set: { status: "called", calledAt: now, consultationStartedAt: now } },
       { sort: { isEmergency: -1, createdAt: 1 }, new: true }
     );
 
@@ -83,10 +87,13 @@ export const callNextPatient = async (
       return res.status(400).json({ success: false, error: "No patients are waiting in the queue." });
     }
 
-    // Atomically update settings currentToken
+    // Atomically update settings currentToken and increment totalServed
     await QueueSettings.findOneAndUpdate(
       { configId: 1 },
-      { $set: { currentToken: nextPatient.tokenNumber } },
+      {
+        $set: { currentToken: nextPatient.tokenNumber },
+        $inc: { totalServed: 1 }
+      },
       { upsert: true }
     );
 
@@ -115,10 +122,10 @@ export const resetQueue = async (
     // Clear all emergency requests
     await EmergencyRequest.deleteMany({});
 
-    // Reset settings atomically
+    // Reset settings atomically (preserve averageConsultationTime, reset counters)
     await QueueSettings.findOneAndUpdate(
       { configId: 1 },
-      { $set: { currentToken: null, lastTokenIndex: 0 } },
+      { $set: { currentToken: null, lastTokenIndex: 0, totalServed: 0, totalRegistered: 0 } },
       { upsert: true }
     );
 

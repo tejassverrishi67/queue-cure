@@ -15,12 +15,11 @@ export const login = async (
 
     // Query database for admin user matching credentials
     const adminUser = await Admin.findOne({
-      username: username.toLowerCase(),
+      username: username.toLowerCase().trim(),
       password: password
     });
 
-    // Check for matching admin record or fallback migration hardcoded admin/admin compatibility
-    if (adminUser || (username.toLowerCase() === "admin" && password === "admin")) {
+    if (adminUser) {
       return res.json({
         success: true
       });

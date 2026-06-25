@@ -1,5 +1,10 @@
 import { getIO, publishQueueState } from "./socketServer";
 
+/**
+ * Emit patientAdded notification + full queue state broadcast.
+ * The specific event is used for toast notifications on clients,
+ * while queueUpdated provides the authoritative state.
+ */
 export const emitPatientAdded = async (name: string, tokenNumber: string): Promise<void> => {
   try {
     const io = getIO();
@@ -10,6 +15,9 @@ export const emitPatientAdded = async (name: string, tokenNumber: string): Promi
   }
 };
 
+/**
+ * Emit tokenAdvanced notification + full queue state broadcast.
+ */
 export const emitTokenAdvanced = async (currentToken: string, patientName: string): Promise<void> => {
   try {
     const io = getIO();
@@ -20,6 +28,9 @@ export const emitTokenAdvanced = async (currentToken: string, patientName: strin
   }
 };
 
+/**
+ * Emit queueReset notification + full queue state broadcast.
+ */
 export const emitQueueReset = async (): Promise<void> => {
   try {
     const io = getIO();
@@ -30,6 +41,9 @@ export const emitQueueReset = async (): Promise<void> => {
   }
 };
 
+/**
+ * Emit consultationTimeUpdated notification + full queue state broadcast.
+ */
 export const emitConsultationTimeUpdated = async (minutes: number): Promise<void> => {
   try {
     const io = getIO();
@@ -40,6 +54,9 @@ export const emitConsultationTimeUpdated = async (minutes: number): Promise<void
   }
 };
 
+/**
+ * Emit emergencyRequestSubmitted notification + full queue state broadcast.
+ */
 export const emitEmergencyRequestSubmitted = async (tokenNumber: string, reason: string): Promise<void> => {
   try {
     const io = getIO();
@@ -50,6 +67,9 @@ export const emitEmergencyRequestSubmitted = async (tokenNumber: string, reason:
   }
 };
 
+/**
+ * Emit emergencyRequestReviewed notification + full queue state broadcast.
+ */
 export const emitEmergencyRequestReviewed = async (tokenNumber: string, status: "approved" | "rejected"): Promise<void> => {
   try {
     const io = getIO();

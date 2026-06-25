@@ -1,12 +1,17 @@
 import { connectDB } from "./config/db";
 import mongoose from "mongoose";
+import dotenv from "dotenv";
 import QueueSettings from "./models/QueueSettings";
 import Admin from "./models/Admin";
 
+dotenv.config();
+
 const verify = async () => {
+  let exitCode = 0;
+
   try {
     console.log("[Verification] Starting database connection check...");
-    
+
     const mongoUri = process.env.MONGODB_URI;
     if (!mongoUri) {
       throw new Error("MONGODB_URI environment variable is not defined.");
@@ -29,7 +34,7 @@ const verify = async () => {
     }
   } catch (error) {
     console.error("[Verification] Database verification FAILED:", error);
-    process.exit(1);
+    exitCode = 1;
   } finally {
     try {
       await mongoose.connection.close();
@@ -37,7 +42,7 @@ const verify = async () => {
     } catch (err) {
       console.error("[Verification] Error closing mongoose connection:", err);
     }
-    process.exit(0);
+    process.exit(exitCode);
   }
 };
 

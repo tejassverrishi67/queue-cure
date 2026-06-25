@@ -8,7 +8,9 @@ import queueRoutes from "./routes/queueRoutes";
 import emergencyRoutes from "./routes/emergencyRoutes";
 import authRoutes from "./routes/authRoutes";
 import { errorHandler } from "./middleware/errorHandler";
-import { initSocketServer } from "./sockets/socketServer";
+import { sanitizeInput } from "./middleware/sanitize";
+import { initSocketServer, getConnectionCount } from "./sockets/socketServer";
+import mongoose from "mongoose";
 
 // Load environment variables
 dotenv.config();
@@ -16,9 +18,24 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Parse allowed CORS origins from environment or use defaults
+const allowedOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(",").map(s => s.trim())
+  : [
+      "https://queue-cure-virid.vercel.app",
+      "https://queue-cure-analytics.onrender.com",
+      "http://localhost:3000",
+      "http://localhost:8000"
+    ];
+
 // Middleware
-app.use(cors());
-app.use(express.json());
+app.use(cors({
+  origin: allowedOrigins,
+  methods: ["GET", "POST", "PUT"],
+  credentials: true
+}));
+app.use(express.json({ limit: "1mb" }));
+app.use(sanitizeInput);
 
 // Routes
 app.use("/api/patients", patientRoutes);
@@ -26,9 +43,15 @@ app.use("/api/queue", queueRoutes);
 app.use("/api/emergencies", emergencyRoutes);
 app.use("/api/auth", authRoutes);
 
-// Catch-all health check / route
-app.get("/health", (req, res) => {
-  res.json({ status: "OK", database: "connected" });
+// Health check endpoint — reports actual database connection state
+app.get("/health", (_req, res) => {
+  const dbState = mongoose.connection.readyState;
+  const dbStatus = dbState === 1 ? "connected" : dbState === 2 ? "connecting" : "disconnected";
+  res.json({
+    status: dbStatus === "connected" ? "OK" : "DEGRADED",
+    database: dbStatus,
+    activeConnections: getConnectionCount()
+  });
 });
 
 // Global Error Handler
@@ -55,5 +78,23 @@ const startServer = async () => {
     process.exit(1);
   }
 };
+
+// Graceful shutdown handler
+const gracefulShutdown = async (signal: string) => {
+  console.log(`[Server] Received ${signal}. Shutting down gracefully...`);
+  httpServer.close(() => {
+    console.log("[Server] HTTP server closed.");
+  });
+  try {
+    await mongoose.connection.close();
+    console.log("[Server] MongoDB connection closed.");
+  } catch (err) {
+    console.error("[Server] Error closing MongoDB connection:", err);
+  }
+  process.exit(0);
+};
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
 startServer();

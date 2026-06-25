@@ -28,11 +28,6 @@ export default function HomePage() {
 
     queueManager.on("queueUpdated", handleQueueUpdated);
 
-    // Load initial queue state if server is online
-    queueManager.sendAction("queueUpdated").catch((err) => {
-      console.warn("[LandingPage] Failed to fetch initial queue state:", err);
-    });
-
     return () => {
       queueManager.off("queueUpdated", handleQueueUpdated);
     };

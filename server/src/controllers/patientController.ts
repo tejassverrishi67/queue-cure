@@ -9,17 +9,18 @@ export const getPatients = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    // Return all patients ordered exactly like the current system (createdAt ASC)
-    const patients = await Patient.find({}).sort({ createdAt: 1 });
-    
+    // Return all patients ordered by createdAt ASC, using .lean() for performance
+    const patients = await Patient.find({}).sort({ createdAt: 1 }).lean();
+
     const formatted = patients.map((p) => ({
-      id: p.id,
+      id: p._id,
       name: p.name,
       tokenNumber: p.tokenNumber,
       status: p.status,
       isEmergency: p.isEmergency,
       createdAt: p.createdAt,
-      calledAt: p.calledAt || null
+      calledAt: p.calledAt || null,
+      consultationStartedAt: p.consultationStartedAt || null
     }));
 
     res.json(formatted);
@@ -39,10 +40,14 @@ export const registerPatient = async (
       return res.status(400).json({ success: false, error: "Patient name is required." });
     }
 
-    // Atomic increment of QueueSettings.lastTokenIndex
+    if (name.length > 100) {
+      return res.status(400).json({ success: false, error: "Patient name must not exceed 100 characters." });
+    }
+
+    // Atomic increment of QueueSettings.lastTokenIndex and totalRegistered
     const settings = await QueueSettings.findOneAndUpdate(
       { configId: 1 },
-      { $inc: { lastTokenIndex: 1 } },
+      { $inc: { lastTokenIndex: 1, totalRegistered: 1 } },
       { new: true, upsert: true }
     );
 

@@ -122,7 +122,9 @@ class SocketQueueManager implements IQueueManager {
       return;
     }
 
-    console.log(`[SocketQueue] Initializing Socket.IO connection to ${this.socketUrl}`);
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`[SocketQueue] Initializing Socket.IO connection to ${this.socketUrl}`);
+    }
 
     this.socket = io(this.socketUrl, {
       transports: ["websocket", "polling"],
@@ -133,23 +135,26 @@ class SocketQueueManager implements IQueueManager {
       reconnectionDelayMax: 5000
     });
 
-    this.socket.on("connect", async () => {
-      console.log(`[SocketQueue] Connected to Socket.IO server: ${this.socket?.id}`);
+    this.socket.on("connect", () => {
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`[SocketQueue] Connected to Socket.IO server: ${this.socket?.id}`);
+      }
       this.connected = true;
       this.dispatch("connect", undefined);
-      
-      // Load initial state on connection/reconnection to preserve refresh and reconnect behavior
-      await this.fetchInitialState();
+      // No fetchInitialState here — the server automatically sends queueUpdated on connect.
+      // This eliminates the race condition where both fetchInitialState and server push fire simultaneously.
     });
 
     this.socket.on("disconnect", (reason) => {
-      console.warn(`[SocketQueue] Disconnected from Socket.IO server. Reason: ${reason}`);
+      if (process.env.NODE_ENV !== "production") {
+        console.warn(`[SocketQueue] Disconnected from Socket.IO server. Reason: ${reason}`);
+      }
       this.connected = false;
       this.dispatch("disconnect", undefined);
     });
 
     this.socket.on("connect_error", (error) => {
-      console.error("[SocketQueue] Socket connection error:", error);
+      console.error("[SocketQueue] Socket connection error:", error.message);
       this.connected = false;
       this.dispatch("disconnect", undefined);
     });
@@ -305,7 +310,6 @@ export function useSocketQueue() {
     globalQueueManager.on("disconnect", handleDisconnect);
 
     // Sync state on mount
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsConnected(globalQueueManager.isConnected());
 
     return () => {
